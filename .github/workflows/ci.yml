@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:  # Enable manual triggering
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    env:
+      FINLAB_TOKEN: ${{ secrets.FINLAB_TOKEN }}    # job-level env
+    strategy:
+      fail-fast: false  # Don't cancel other jobs if one fails
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - name: Set up Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        uv sync --dev
+
+    - name: Run unit tests
+      run: |
+        uv run pytest tests/unit/ -v --tb=short -n auto
+
+    - name: Run mock integration tests
+      run: |
+        uv run pytest tests/integration/mock/ -v --tb=short -n auto
+      env:
+        FINLAB_TOKEN: ""  # Ensure no token is set for mock tests
+
+    - name: Run real integration tests (with finlab token)
+      if: ${{ env.FINLAB_TOKEN != '' }}
+      run: |
+        uv run pytest tests/integration/real/ -v --tb=short -n auto
+      continue-on-error: true  # Don't fail CI if finlab tests fail
+
+    - name: Run edge case tests
+      run: |
+        uv run pytest tests/unit/test_boundary_conditions.py tests/unit/test_error_scenarios.py -v --tb=short -n auto
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - name: Set up Python
+      run: uv python install 3.11
+
+    - name: Install dependencies
+      run: uv sync --dev
+
+    - name: Run ruff check
+      run: uv run ruff check src/ tests/
+
+    - name: Run ruff format check
+      run: uv run ruff format --check src/ tests/
+
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - name: Set up Python
+      run: uv python install 3.11
+
+    - name: Install dependencies
+      run: uv sync --dev
+
+    - name: Run mypy
+      run: uv run mypy src/

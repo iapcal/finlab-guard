@@ -1,0 +1,51 @@
+[project]
+name = "finlab-guard"
+version = "0.1.0"
+description = "A lightweight package for managing local finlab data cache with versioning and time-context features"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+    { name = "iapcal", email = "chiyimin2018@gmail.com" }
+]
+keywords = ["finlab", "cache", "data", "versioning", "backtesting"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Financial",
+]
+dependencies = [
+    "finlab>=1.2.23",
+    "pandas>=1.5.0",
+    "pyarrow>=10.0.0", # for parquet support
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.2",
+    "freezegun>=1.2.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "build>=1.3.0",
+    "mypy>=1.18.1",
+    "pandas-stubs>=2.2.2.240807",
+    "pytest>=8.4.2",
+    "pytest-xdist>=3.6.0",
+    "ruff>=0.13.0",
+    "twine>=6.2.0",
+]
