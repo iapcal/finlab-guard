@@ -200,7 +200,7 @@ class DataValidator:
         # New rows (entire row is new for rows not in existing_data)
         new_row_idx = new_data.index.difference(existing_data.index)
         if len(new_row_idx) > 0:
-            series = new_data.loc[new_row_idx].stack(dropna=True)
+            series = new_data.loc[new_row_idx].stack()
             for coord, v in series.items():
                 r, c = cast(tuple[Any, Any], coord)
                 additions.append(Change((r, c), None, v, timestamp))
@@ -209,7 +209,7 @@ class DataValidator:
         new_cols = new_data.columns.difference(existing_data.columns)
         common_rows_for_new_cols = existing_data.index.intersection(new_data.index)
         if len(new_cols) > 0 and len(common_rows_for_new_cols) > 0:
-            part = new_data.loc[common_rows_for_new_cols, new_cols].stack(dropna=True)
+            part = new_data.loc[common_rows_for_new_cols, new_cols].stack()
             for coord, v in part.items():
                 r, c = cast(tuple[Any, Any], coord)
                 additions.append(Change((r, c), None, v, timestamp))
@@ -225,7 +225,7 @@ class DataValidator:
     ) -> list[Change]:
         changes: list[Change] = []
         # iterate only non-NaN values
-        for coord, v in df.stack(dropna=True).items():
+        for coord, v in df.stack().items():
             r, c = cast(tuple[Any, Any], coord)
             old_value = None if is_addition else v
             new_value = v

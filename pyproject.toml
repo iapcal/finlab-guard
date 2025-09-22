@@ -1,6 +1,6 @@
 [project]
 name = "finlab-guard"
-version = "0.1.0"
+version = "0.2.0"
 description = "A lightweight package for managing local finlab data cache with versioning and time-context features"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -24,7 +24,7 @@ classifiers = [
 dependencies = [
     "duckdb>=1.4.0",
     "finlab>=1.2.23",
-    "pandas>=1.5.0",
+    "pandas>=2.1.0",
     "polars>=0.20.0",
     "numpy>=1.24.0",
     "pyarrow>=10.0.0", # for parquet support

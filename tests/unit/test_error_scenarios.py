@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 import pytest
+import duckdb
 
 from finlab_guard.cache.manager import CacheManager
 from finlab_guard.cache.validator import DataValidator
@@ -43,7 +44,7 @@ class TestFinlabGuardErrorScenarios:
             os.chmod(readonly_dir, 0o444)  # Read-only
             # DuckDB architecture requires write permissions to create database file
             with pytest.raises(
-                (OSError, RuntimeError)
+                (OSError, RuntimeError, duckdb.IOException)
             ):  # DuckDB IOException or similar
                 FinlabGuard(cache_dir=readonly_dir)
         finally:
