@@ -19,3 +19,6 @@ example_cache/
 # IDEs
 .vscode/
 .idea/
+
+# Benchmarks (not version controlled)
+benchmarks/

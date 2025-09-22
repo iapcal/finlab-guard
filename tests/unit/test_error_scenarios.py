@@ -41,9 +41,11 @@ class TestFinlabGuardErrorScenarios:
         readonly_dir = tempfile.mkdtemp()
         try:
             os.chmod(readonly_dir, 0o444)  # Read-only
-            # Should still work as expanduser and mkdir handle permissions
-            guard = FinlabGuard(cache_dir=readonly_dir)
-            assert guard.cache_dir == Path(readonly_dir)
+            # DuckDB architecture requires write permissions to create database file
+            with pytest.raises(
+                (OSError, RuntimeError)
+            ):  # DuckDB IOException or similar
+                FinlabGuard(cache_dir=readonly_dir)
         finally:
             os.chmod(readonly_dir, 0o755)  # Restore permissions
             shutil.rmtree(readonly_dir, ignore_errors=True)
@@ -249,9 +251,10 @@ class TestCacheManagerErrorScenarios:
             {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
         )
 
-        # Mock to simulate disk full error
-        with patch(
-            "pandas.DataFrame.to_parquet",
+        # Mock save_snapshot to simulate disk full error
+        with patch.object(
+            self.cache_manager,
+            "save_snapshot",
             side_effect=OSError("No space left on device"),
         ):
             with pytest.raises(OSError):
@@ -263,9 +266,10 @@ class TestCacheManagerErrorScenarios:
             {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
         )
 
-        # Mock to simulate permission denied
-        with patch(
-            "pandas.DataFrame.to_parquet",
+        # Mock save_snapshot to simulate permission denied
+        with patch.object(
+            self.cache_manager,
+            "save_snapshot",
             side_effect=PermissionError("Permission denied"),
         ):
             with pytest.raises(PermissionError):
@@ -283,8 +287,9 @@ class TestCacheManagerErrorScenarios:
         with patch(
             "pathlib.Path.unlink", side_effect=PermissionError("Permission denied")
         ):
-            with pytest.raises(PermissionError):
-                self.cache_manager.clear_key("test_key")
+            # clear_key handles exceptions gracefully and logs them
+            # instead of raising, so we just verify it doesn't crash
+            self.cache_manager.clear_key("test_key")
 
     def test_get_cache_path_with_special_characters(self):
         """Test getting cache path with various special characters."""

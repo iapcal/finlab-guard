@@ -240,6 +240,8 @@ class TestTimeContextIntegration:
                 )
 
                 # For data that exists in both, verify values match
+                print(description, query_time, expected_data)
+                assert expected_data.equals(result), f"{expected_data}, {result}"
                 for col in expected_data.columns:
                     if col in result.columns:
                         for idx in expected_data.index:

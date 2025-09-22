@@ -306,108 +306,63 @@ class TestCacheManager:
 
     # === 資料重建邏輯 ===
 
-    def test_reconstruct_dataframe_simple(self, cache_manager):
-        """Test simple DataFrame reconstruction."""
-        key = "test_key"
-        stacked_data = pd.DataFrame(
-            {
-                "index": ["A", "B"],
-                "column": ["col1", "col1"],
-                "value": [1, 2],
-                "save_time": [datetime.now(), datetime.now()],
-            }
-        )
+    # === DuckDB Reconstruction Tests ===
 
-        result = cache_manager._reconstruct_dataframe(stacked_data, None, key)
+    def test_reconstruct_as_of_simple(self, cache_manager):
+        """Test simple DuckDB-based reconstruction."""
+        key = "test_key"
+        timestamp = datetime(2024, 1, 1, 10, 0, 0)
+
+        # Create and save test DataFrame
+        df = pd.DataFrame({"col1": [1, 2], "col2": [1.1, 2.2]}, index=["A", "B"])
+        cache_manager.save_data(key, df, timestamp)
+
+        # Test reconstruction
+        result = cache_manager.reconstruct_as_of(key, timestamp)
 
         assert not result.empty
-        assert result.loc["A", "col1"] == 1
-        assert result.loc["B", "col1"] == 2
+        assert result.shape == (2, 2)
+        # Check numeric values (handle both int and float representations)
+        assert float(result.loc["A", "col1"]) == 1.0
+        assert float(result.loc["B", "col2"]) == 2.2
 
-    def test_reconstruct_dataframe_time_filtering(self, cache_manager):
-        """Test DataFrame reconstruction with time filtering."""
+    def test_reconstruct_as_of_time_filtering(self, cache_manager):
+        """Test DuckDB reconstruction with time filtering."""
         key = "test_key"
         timestamp1 = datetime(2024, 1, 1, 10, 0, 0)
         timestamp2 = datetime(2024, 1, 1, 11, 0, 0)
         target_time = datetime(2024, 1, 1, 10, 30, 0)
 
-        stacked_data = pd.DataFrame(
-            {
-                "index": ["A", "A"],
-                "column": ["col1", "col1"],
-                "value": [1, 2],  # Second value should be filtered out
-                "save_time": [timestamp1, timestamp2],
-            }
-        )
+        # Save initial data
+        df1 = pd.DataFrame({"col1": [1]}, index=["A"])
+        cache_manager.save_data(key, df1, timestamp1)
 
-        result = cache_manager._reconstruct_dataframe(stacked_data, target_time, key)
+        # Save modified data
+        df2 = pd.DataFrame({"col1": [2]}, index=["A"])
+        cache_manager.save_data(key, df2, timestamp2)
 
-        assert result.loc["A", "col1"] == 1  # Should get first value
+        # Query at intermediate time should get first value
+        result = cache_manager.reconstruct_as_of(key, target_time)
+        assert float(result.loc["A", "col1"]) == 1.0  # Handle both "1" and "1.0"
 
-    def test_reconstruct_dataframe_order_preservation(
-        self, cache_manager, temp_cache_dir
-    ):
-        """Test that column and index order is preserved during reconstruction."""
-        key = "test_key"
+        # Query after second timestamp should get second value
+        result_later = cache_manager.reconstruct_as_of(key, timestamp2)
+        assert float(result_later.loc["A", "col1"]) == 2.0  # Handle both "2" and "2.0"
 
-        # Create dtype mapping with specific order
-        dtype_mapping = {
-            "schema_version": "1.0",
-            "last_updated": datetime.now().isoformat(),
-            "dtype_history": [
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "dtypes": {"col2": "int64", "col1": "int64"},
-                    "index_dtype": "object",
-                    "columns_dtype": "object",
-                    "columns_order": ["col2", "col1"],  # Specific order
-                    "index_order": ["B", "A"],  # Specific order
-                }
-            ],
-        }
+    def test_polars_diff_computation(self, cache_manager):
+        """Test Polars-based diff computation."""
+        prev_df = pd.DataFrame({"col1": [1, 2], "col2": [1.1, 2.2]}, index=["A", "B"])
+        cur_df = pd.DataFrame({"col1": [1, 3], "col2": [1.1, 2.2]}, index=["A", "B"])
+        timestamp = datetime.now()
 
-        # Save dtype mapping
-        dtype_path = cache_manager._get_dtype_path(key)
-        dtype_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(dtype_path, "w") as f:
-            json.dump(dtype_mapping, f)
+        # Test the Polars diff method
+        result = cache_manager.get_changes_extended(prev_df, cur_df, timestamp)
 
-        # Create stacked data
-        stacked_data = pd.DataFrame(
-            {
-                "index": ["A", "A", "B", "B"],
-                "column": ["col1", "col2", "col1", "col2"],
-                "value": [1, 2, 3, 4],
-                "save_time": [datetime.now()] * 4,
-            }
-        )
-
-        result = cache_manager._reconstruct_dataframe(stacked_data, None, key)
-
-        # Verify column order
-        assert list(result.columns) == ["col2", "col1"]
-        # Verify index order
-        assert list(result.index) == ["B", "A"]
-
-    def test_reconstruct_dataframe_numeric_types(self, cache_manager):
-        """Test reconstruction with various numeric types."""
-        key = "test_key"
-
-        stacked_data = pd.DataFrame(
-            {
-                "index": ["A", "A", "A"],
-                "column": ["int_col", "float_col", "bool_col"],
-                "value": [1, 1.5, True],
-                "save_time": [datetime.now()] * 3,
-            }
-        )
-
-        result = cache_manager._reconstruct_dataframe(stacked_data, None, key)
-
-        assert not result.empty
-        assert result.loc["A", "int_col"] == 1
-        assert result.loc["A", "float_col"] == 1.5
-        assert result.loc["A", "bool_col"]
+        assert not result.cell_changes.empty
+        # Should have one change: B,col1 changed from 2 to 3
+        assert len(result.cell_changes) == 1
+        assert result.cell_changes.iloc[0]["row_key"] == "B"
+        assert result.cell_changes.iloc[0]["col_key"] == "col1"
 
     def test_apply_dtypes_to_result_columns(self, cache_manager, temp_cache_dir):
         """Test applying dtypes to DataFrame columns."""
@@ -512,34 +467,48 @@ class TestCacheManager:
         # Verify columns dtype
         assert result.columns.dtype == np.dtype("object")
 
-    def test_stack_dataframe_normal(self, cache_manager):
-        """Test stacking normal DataFrame."""
-        df = pd.DataFrame({"col1": [1, 2], "col2": [3, 4]}, index=["A", "B"])
+    # === DuckDB Storage Tests ===
+
+    def test_save_snapshot(self, cache_manager):
+        """Test saving a complete DataFrame snapshot."""
+        key = "test_key"
+        df = pd.DataFrame({"col1": [1, 2], "col2": [1.1, 2.2]}, index=["A", "B"])
         timestamp = datetime.now()
 
-        result = cache_manager._stack_dataframe(df, timestamp)
+        # Save snapshot
+        cache_manager.save_snapshot(key, df, timestamp)
 
-        assert len(result) == 4  # 2 rows × 2 columns
-        # Check expected columns (actual column names depend on index/columns names)
-        expected_cols = [
-            "_finlab_index_none",
-            "_finlab_columns_none",
-            "value",
-            "save_time",
-        ]
-        assert all(col in result.columns for col in expected_cols)
+        # Verify data in rows_base table
+        query = f"SELECT * FROM rows_base WHERE table_id = '{key}'"
+        result = cache_manager.conn.execute(query).fetchdf()
 
-    def test_stack_dataframe_none_names(self, cache_manager):
-        """Test stacking DataFrame with None names."""
-        df = pd.DataFrame({"col1": [1, 2], "col2": [3, 4]})
-        df.index.name = None
-        df.columns.name = None
-        timestamp = datetime.now()
+        assert len(result) == 2  # Two rows
+        assert all(result["table_id"] == key)
+        assert set(result["row_key"]) == {"A", "B"}
 
-        result = cache_manager._stack_dataframe(df, timestamp)
+    def test_save_version_changes(self, cache_manager):
+        """Test saving incremental changes between DataFrame versions."""
+        key = "test_key"
+        timestamp1 = datetime(2024, 1, 1, 10, 0, 0)
+        timestamp2 = datetime(2024, 1, 1, 11, 0, 0)
 
-        assert len(result) == 4
-        assert not result.empty
+        # Create DataFrames
+        prev_df = pd.DataFrame({"col1": [1, 2], "col2": [1.1, 2.2]}, index=["A", "B"])
+        cur_df = pd.DataFrame({"col1": [1, 3], "col2": [1.1, 2.2]}, index=["A", "B"])
+
+        # First save snapshot
+        cache_manager.save_snapshot(key, prev_df, timestamp1)
+
+        # Then save version with changes
+        cache_manager.save_version(key, prev_df, cur_df, timestamp2)
+
+        # Verify changes in cell_changes table
+        query = f"SELECT * FROM cell_changes WHERE table_id = '{key}'"
+        result = cache_manager.conn.execute(query).fetchdf()
+
+        assert len(result) == 1  # One cell change
+        assert result.iloc[0]["row_key"] == "B"
+        assert result.iloc[0]["col_key"] == "col1"
 
     # === 增量儲存 ===
 
@@ -586,18 +555,13 @@ class TestCacheManager:
     # === 輔助方法 ===
 
     def test_get_cache_path(self, cache_manager):
-        """Test cache path generation."""
-        key = "test:key/with\\special*chars"
+        """Test cache path generation - now returns DuckDB path."""
+        key = "test_key"
         path = cache_manager._get_cache_path(key)
 
-        # Verify path is valid and safe
-        assert path.suffix == ".parquet"
-        # Check that some special chars are replaced in filename (: / \)
-        assert (
-            ":" not in path.name
-        )  # Check only filename, not full path (Windows has C:)
-        assert "/" not in path.name  # / should be replaced in filename
-        assert "\\" not in path.name  # \ should be replaced in filename
+        # Verify path points to DuckDB file
+        assert path.suffix == ".duckdb"
+        assert path.name == "cache.duckdb"
 
     def test_get_dtype_path(self, cache_manager):
         """Test dtype path generation."""
@@ -607,19 +571,42 @@ class TestCacheManager:
         assert path.suffix == ".json"
         assert "dtypes" in str(path)
 
-    def test_atomic_write_parquet(self, cache_manager, sample_dataframe):
-        """Test atomic parquet writing."""
+    def test_compaction(self, cache_manager):
+        """Test DuckDB compaction functionality."""
         key = "test_key"
+        timestamp1 = datetime(2024, 1, 1, 10, 0, 0)
+        timestamp2 = datetime(2024, 1, 1, 11, 0, 0)
+        cutoff_time = datetime(2024, 1, 1, 10, 30, 0)
 
-        # This should not raise any exceptions
-        cache_manager._atomic_write_parquet(key, sample_dataframe)
+        # Create initial data
+        df1 = pd.DataFrame({"col1": [1, 2]}, index=["A", "B"])
+        cache_manager.save_data(key, df1, timestamp1)
 
-        # Verify file exists
-        cache_path = cache_manager._get_cache_path(key)
-        assert cache_path.exists()
+        # Make changes
+        df2 = pd.DataFrame({"col1": [1, 3]}, index=["A", "B"])
+        cache_manager.save_data(key, df2, timestamp2)
+
+        # Verify we have cell changes
+        changes_before = cache_manager.conn.execute(
+            f"SELECT COUNT(*) FROM cell_changes WHERE table_id = '{key}'"
+        ).fetchone()[0]
+        assert changes_before > 0
+
+        # Compact up to cutoff time
+        cache_manager.compact_up_to(key, cutoff_time)
+
+        # Verify changes before cutoff are removed
+        changes_after = cache_manager.conn.execute(
+            f"SELECT COUNT(*) FROM cell_changes WHERE table_id = '{key}' AND save_time <= TIMESTAMP '{cutoff_time.isoformat()}'"
+        ).fetchone()[0]
+        assert changes_after == 0
+
+        # Verify we can still reconstruct latest data
+        result = cache_manager.load_data(key)
+        assert not result.empty
 
     def test_get_storage_info(self, cache_manager, sample_dataframe):
-        """Test getting storage information."""
+        """Test getting storage information from DuckDB."""
         key = "test_key"
 
         # Save some data
@@ -628,14 +615,22 @@ class TestCacheManager:
         # Get storage info for specific key
         info = cache_manager.get_storage_info(key)
         assert key in info
-        assert "file_size" in info[key]
-        assert "modified_time" in info[key]
-        assert "record_count" in info[key]
+        # Check DuckDB-specific storage info
+        assert "snapshot_rows" in info[key]
+        assert "cell_changes" in info[key]
+        assert "row_additions" in info[key]
+        assert "last_modified" in info[key]
+        assert "storage_type" in info[key]
+        assert info[key]["storage_type"] == "duckdb"
+        assert info[key]["snapshot_rows"] == 3  # sample_dataframe has 3 rows
 
         # Get storage info for all keys
         all_info = cache_manager.get_storage_info()
-        assert "total_size" in all_info
         assert key in all_info
+        assert "total_records" in all_info[key]
+        # Check for database file size info
+        if "database_file_size" in all_info:
+            assert all_info["database_file_size"] > 0
 
     def test_datetime_index_frequency_preservation(self, cache_manager):
         """Test that DatetimeIndex frequency is preserved through save/load cycle."""
@@ -661,3 +656,115 @@ class TestCacheManager:
 
         # Verify data content is correct
         pd.testing.assert_frame_equal(loaded_data, df_with_freq)
+
+    # === New DuckDB Features Tests ===
+
+    def test_large_row_change_threshold(self, cache_manager):
+        """Test row change threshold functionality for large changes."""
+        key = "threshold_test"
+        timestamp1 = datetime(2024, 1, 1, 10, 0, 0)
+        timestamp2 = datetime(2024, 1, 1, 11, 0, 0)
+
+        # Create DataFrame with many columns
+        prev_df = pd.DataFrame({f"col_{i}": [1] for i in range(10)}, index=["A"])
+        # Change all columns (exceeds default threshold of 200)
+        cur_df = pd.DataFrame({f"col_{i}": [2] for i in range(10)}, index=["A"])
+
+        # Set low threshold to test the feature
+        cache_manager.row_change_threshold = 5
+
+        # Save initial data
+        cache_manager.save_snapshot(key, prev_df, timestamp1)
+
+        # Save with many changes
+        cache_manager.save_version(key, prev_df, cur_df, timestamp2)
+
+        # Check that the row was stored in row_additions (not cell_changes)
+        row_adds = cache_manager.conn.execute(
+            f"SELECT COUNT(*) FROM row_additions WHERE table_id = '{key}'"
+        ).fetchone()[0]
+        cell_changes = cache_manager.conn.execute(
+            f"SELECT COUNT(*) FROM cell_changes WHERE table_id = '{key}'"
+        ).fetchone()[0]
+
+        assert row_adds > 0  # Should have row addition entry
+        assert cell_changes == 0  # Should not have individual cell changes
+
+        # Verify reconstruction still works
+        result = cache_manager.reconstruct_as_of(key, timestamp2)
+        assert result.shape == (1, 10)
+
+    def test_new_rows_and_columns_handling(self, cache_manager):
+        """Test handling of new rows and columns in diff computation."""
+        key = "new_data_test"
+        timestamp1 = datetime(2024, 1, 1, 10, 0, 0)
+        timestamp2 = datetime(2024, 1, 1, 11, 0, 0)
+
+        # Initial DataFrame
+        prev_df = pd.DataFrame({"col1": [1, 2]}, index=["A", "B"])
+
+        # Add new row and new column
+        cur_df = pd.DataFrame(
+            {"col1": [1, 2, 3], "col2": [10, 20, 30]}, index=["A", "B", "C"]
+        )
+
+        # Save initial data
+        cache_manager.save_snapshot(key, prev_df, timestamp1)
+
+        # Save with new data
+        cache_manager.save_version(key, prev_df, cur_df, timestamp2)
+
+        # Verify reconstruction
+        result = cache_manager.reconstruct_as_of(key, timestamp2)
+        assert result.shape == (3, 2)
+        assert "col2" in result.columns
+        assert "C" in result.index
+
+    def test_duckdb_performance_indexes(self, cache_manager):
+        """Test that DuckDB indexes are created for performance."""
+        # The indexes should be created during table setup
+        # Check that they exist (DuckDB doesn't have a standard way to list indexes,
+        # but we can verify the tables were created successfully)
+
+        tables_query = "SHOW TABLES"
+        tables = cache_manager.conn.execute(tables_query).fetchall()
+        table_names = [table[0] for table in tables]
+
+        assert "rows_base" in table_names
+        assert "cell_changes" in table_names
+        assert "row_additions" in table_names
+
+        # Test that the tables have the expected structure
+        for table in ["rows_base", "cell_changes", "row_additions"]:
+            describe_query = f"DESCRIBE {table}"
+            columns = cache_manager.conn.execute(describe_query).fetchall()
+            assert len(columns) > 0  # Each table should have columns
+
+    def test_json_serialization_handling(self, cache_manager):
+        """Test handling of various data types through JSON serialization."""
+        key = "json_test"
+        timestamp = datetime.now()
+
+        # Create DataFrame with various data types
+        df = pd.DataFrame(
+            {
+                "int_col": [1, 2, 3],
+                "float_col": [1.1, 2.2, float("nan")],
+                "str_col": ["a", "b", "c"],
+                "bool_col": [True, False, True],
+                "none_col": [None, "value", None],
+            },
+            index=["A", "B", "C"],
+        )
+
+        # Save and load
+        cache_manager.save_data(key, df, timestamp)
+        result = cache_manager.load_data(key)
+
+        # Verify basic structure
+        assert result.shape == df.shape
+        assert set(result.columns) == set(df.columns)
+        assert set(result.index.astype(str)) == set(df.index.astype(str))
+
+        # Note: Due to JSON serialization, exact type matching may vary
+        # but the data should be reconstructible

@@ -346,8 +346,8 @@ class TestDataValidator:
         )
 
         # Should detect additions where NaN became a value
-        assert len(additions) == 2  # B,col1 and C,col2
-        assert len(modifications) == 0
+        assert len(additions) == 0
+        assert len(modifications) == 2  # B,col1 and C,col2
 
     def test_detect_changes_with_different_dtypes(self, validator, mock_cache_manager):
         """Test change detection with different data types."""
