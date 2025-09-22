@@ -5,13 +5,14 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
+import duckdb
 import pandas as pd
 import pytest
-import duckdb
 
 from finlab_guard.cache.manager import CacheManager
 from finlab_guard.cache.validator import DataValidator
@@ -24,6 +25,20 @@ from finlab_guard.utils.exceptions import (
 )
 
 
+def safe_rmtree(path, ignore_errors=False):
+    """Windows-compatible rmtree with retry logic for DuckDB file locking."""
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path, ignore_errors=ignore_errors)
+            break
+        except (PermissionError, OSError):
+            if attempt < 4:
+                time.sleep(0.1)  # Wait 100ms before retry
+                continue
+            if not ignore_errors:
+                raise
+
+
 class TestFinlabGuardErrorScenarios:
     """Test error scenarios for FinlabGuard class."""
 
@@ -34,7 +49,7 @@ class TestFinlabGuardErrorScenarios:
 
     def teardown_method(self):
         """Clean up test environment."""
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        safe_rmtree(self.temp_dir, ignore_errors=True)
 
     def test_init_with_invalid_cache_dir_permissions(self):
         """Test initialization with invalid cache directory permissions."""
@@ -49,7 +64,7 @@ class TestFinlabGuardErrorScenarios:
                 FinlabGuard(cache_dir=readonly_dir)
         finally:
             os.chmod(readonly_dir, 0o755)  # Restore permissions
-            shutil.rmtree(readonly_dir, ignore_errors=True)
+            safe_rmtree(readonly_dir, ignore_errors=True)
 
     def test_set_time_context_with_invalid_string(self):
         """Test setting time context with invalid string."""
@@ -220,7 +235,7 @@ class TestCacheManagerErrorScenarios:
 
     def teardown_method(self):
         """Clean up test environment."""
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        safe_rmtree(self.temp_dir, ignore_errors=True)
 
     def test_load_data_with_corrupted_parquet(self):
         """Test loading data when parquet file is corrupted."""
@@ -385,7 +400,7 @@ class TestDataValidatorErrorScenarios:
             assert len(additions) > 0  # All data should be treated as additions
 
         finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            safe_rmtree(temp_dir, ignore_errors=True)
 
     def test_detect_changes_with_empty_new_data(self):
         """Test change detection with empty new DataFrame."""
@@ -410,7 +425,7 @@ class TestDataValidatorErrorScenarios:
             assert len(additions) == 0
 
         finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            safe_rmtree(temp_dir, ignore_errors=True)
 
     def test_detect_changes_with_mismatched_columns(self):
         """Test change detection with completely different column structure."""
@@ -438,7 +453,7 @@ class TestDataValidatorErrorScenarios:
             assert len(additions) > 0
 
         finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            safe_rmtree(temp_dir, ignore_errors=True)
 
 
 class TestExceptionClasses:

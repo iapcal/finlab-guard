@@ -63,6 +63,24 @@ class CacheManager:
         self.conn = duckdb.connect(str(db_path))
         self._setup_tables()
 
+    def close(self) -> None:
+        """Close the DuckDB connection."""
+        if hasattr(self, "conn") and self.conn:
+            self.conn.close()
+            self.conn = None
+
+    def __del__(self) -> None:
+        """Ensure connection is closed when object is destroyed."""
+        self.close()
+
+    def __enter__(self) -> "CacheManager":
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Context manager exit - ensure connection is closed."""
+        self.close()
+
     def _setup_tables(self) -> None:
         """Initialize DuckDB tables for cache storage."""
         self.conn.execute(

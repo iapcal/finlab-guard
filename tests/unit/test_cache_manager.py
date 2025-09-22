@@ -1,8 +1,10 @@
 """Unit tests for CacheManager class."""
 
 import json
+import os
 import shutil
 import tempfile
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -15,6 +17,20 @@ from finlab_guard.cache.manager import CacheManager
 from finlab_guard.utils.exceptions import InvalidDataTypeException
 
 
+def safe_rmtree(path, ignore_errors=False):
+    """Windows-compatible rmtree with retry logic for DuckDB file locking."""
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path, ignore_errors=ignore_errors)
+            break
+        except (PermissionError, OSError):
+            if attempt < 4:
+                time.sleep(0.1)  # Wait 100ms before retry
+                continue
+            if not ignore_errors:
+                raise
+
+
 class TestCacheManager:
     """Test suite for CacheManager class."""
 
@@ -23,7 +39,7 @@ class TestCacheManager:
         """Create temporary cache directory for testing."""
         temp_dir = tempfile.mkdtemp()
         yield Path(temp_dir)
-        shutil.rmtree(temp_dir)
+        safe_rmtree(temp_dir)
 
     @pytest.fixture
     def cache_manager(self, temp_cache_dir):

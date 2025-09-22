@@ -2,6 +2,7 @@
 
 import shutil
 import tempfile
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -18,6 +19,20 @@ from finlab_guard.utils.exceptions import (
 )
 
 
+def safe_rmtree(path, ignore_errors=False):
+    """Windows-compatible rmtree with retry logic for DuckDB file locking."""
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path, ignore_errors=ignore_errors)
+            break
+        except (PermissionError, OSError):
+            if attempt < 4:
+                time.sleep(0.1)  # Wait 100ms before retry
+                continue
+            if not ignore_errors:
+                raise
+
+
 class TestFinlabGuard:
     """Test suite for FinlabGuard class."""
 
@@ -26,7 +41,7 @@ class TestFinlabGuard:
         """Create temporary cache directory for testing."""
         temp_dir = tempfile.mkdtemp()
         yield Path(temp_dir)
-        shutil.rmtree(temp_dir)
+        safe_rmtree(temp_dir)
 
     @pytest.fixture
     def guard(self, temp_cache_dir):
@@ -258,7 +273,7 @@ class TestFinlabGuard:
 
         # Cleanup
         if guard.cache_dir.exists():
-            shutil.rmtree(guard.cache_dir)
+            safe_rmtree(guard.cache_dir)
 
     def test_large_dataset_handling(self, guard):
         """Test handling of large datasets in cache operations."""
