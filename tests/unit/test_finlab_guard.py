@@ -90,6 +90,9 @@ class TestFinlabGuard:
             assert non_existent_dir.exists()
             assert guard.cache_dir == non_existent_dir
 
+            # Close the guard to prevent Windows file locking issues
+            guard.close()
+
     # === 時間上下文管理 ===
 
     def test_set_time_context_datetime(self, guard):
