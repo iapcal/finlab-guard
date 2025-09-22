@@ -49,20 +49,30 @@ class TestFinlabGuardErrorScenarios:
 
     def teardown_method(self):
         """Clean up test environment."""
+        # Close DuckDB connections to prevent Windows file locking
+        if hasattr(self, 'guard') and self.guard:
+            self.guard.close()
         safe_rmtree(self.temp_dir, ignore_errors=True)
 
     def test_init_with_invalid_cache_dir_permissions(self):
         """Test initialization with invalid cache directory permissions."""
+        # Skip this test on Windows as it handles permissions differently
+        if sys.platform.startswith('win'):
+            pytest.skip("Windows permission handling differs from Unix")
+
         # Create a read-only directory
         readonly_dir = tempfile.mkdtemp()
+        guard = None
         try:
             os.chmod(readonly_dir, 0o444)  # Read-only
             # DuckDB architecture requires write permissions to create database file
             with pytest.raises(
                 (OSError, RuntimeError, duckdb.IOException)
             ):  # DuckDB IOException or similar
-                FinlabGuard(cache_dir=readonly_dir)
+                guard = FinlabGuard(cache_dir=readonly_dir)
         finally:
+            if guard:
+                guard.close()
             os.chmod(readonly_dir, 0o755)  # Restore permissions
             safe_rmtree(readonly_dir, ignore_errors=True)
 
@@ -235,15 +245,31 @@ class TestCacheManagerErrorScenarios:
 
     def teardown_method(self):
         """Clean up test environment."""
+        # Close DuckDB connections to prevent Windows file locking
+        if hasattr(self, 'cache_manager') and self.cache_manager:
+            self.cache_manager.close()
         safe_rmtree(self.temp_dir, ignore_errors=True)
 
     def test_load_data_with_corrupted_parquet(self):
         """Test loading data when parquet file is corrupted."""
+        # Skip this test on Windows due to DuckDB file locking issues
+        if sys.platform.startswith('win'):
+            pytest.skip("Windows DuckDB file locking prevents direct file corruption")
+
         # Create a corrupted parquet file
         cache_path = self.cache_manager._get_cache_path("test_key")
         cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Close connection before attempting to write to file
+        self.cache_manager.close()
+
         with open(cache_path, "w") as f:
             f.write("corrupted data")
+
+        # Recreate cache manager to test corruption handling
+        self.cache_manager = CacheManager(
+            Path(self.temp_dir), {"compression": "snappy"}
+        )
 
         # Should handle corruption gracefully
         result = self.cache_manager.load_data("test_key")
@@ -378,15 +404,27 @@ class TestDataValidatorErrorScenarios:
 
     def test_detect_changes_with_corrupted_cache(self):
         """Test change detection when cache is corrupted."""
+        # Skip this test on Windows due to DuckDB file locking issues
+        if sys.platform.startswith('win'):
+            pytest.skip("Windows DuckDB file locking prevents direct file corruption")
+
         temp_dir = tempfile.mkdtemp()
+        cache_manager = None
         try:
             cache_manager = CacheManager(Path(temp_dir), {"compression": "snappy"})
 
             # Create corrupted cache
             cache_path = cache_manager._get_cache_path("test_key")
             cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Close connection before attempting to write to file
+            cache_manager.close()
+
             with open(cache_path, "w") as f:
                 f.write("corrupted")
+
+            # Recreate cache manager
+            cache_manager = CacheManager(Path(temp_dir), {"compression": "snappy"})
 
             new_data = pd.DataFrame(
                 {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
@@ -400,6 +438,8 @@ class TestDataValidatorErrorScenarios:
             assert len(additions) > 0  # All data should be treated as additions
 
         finally:
+            if cache_manager:
+                cache_manager.close()
             safe_rmtree(temp_dir, ignore_errors=True)
 
     def test_detect_changes_with_empty_new_data(self):

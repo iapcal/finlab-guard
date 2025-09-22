@@ -322,3 +322,18 @@ class FinlabGuard:
             Dictionary with storage information
         """
         return self.cache_manager.get_storage_info(key)
+
+    def close(self) -> None:
+        """Close the underlying cache manager and its connections."""
+        if hasattr(self, "cache_manager") and self.cache_manager:
+            self.cache_manager.close()
+
+    def __enter__(self) -> "FinlabGuard":
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Context manager exit - ensure connections are closed."""
+        # Standard context manager parameters are not used
+        del exc_type, exc_val, exc_tb
+        self.close()

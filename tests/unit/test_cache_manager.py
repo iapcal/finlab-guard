@@ -45,7 +45,10 @@ class TestCacheManager:
     def cache_manager(self, temp_cache_dir):
         """Create CacheManager instance for testing."""
         config = {"compression": "snappy"}
-        return CacheManager(temp_cache_dir, config)
+        manager = CacheManager(temp_cache_dir, config)
+        yield manager
+        # Ensure DuckDB connection is closed to prevent Windows file locking
+        manager.close()
 
     @pytest.fixture
     def sample_dataframe(self):

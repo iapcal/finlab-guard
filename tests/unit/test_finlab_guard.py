@@ -47,7 +47,10 @@ class TestFinlabGuard:
     def guard(self, temp_cache_dir):
         """Create FinlabGuard instance for testing."""
         config = {"compression": "snappy", "progress_bar": False}
-        return FinlabGuard(cache_dir=str(temp_cache_dir), config=config)
+        guard_instance = FinlabGuard(cache_dir=str(temp_cache_dir), config=config)
+        yield guard_instance
+        # Ensure DuckDB connection is closed to prevent Windows file locking
+        guard_instance.close()
 
     @pytest.fixture
     def sample_dataframe(self):
@@ -272,6 +275,7 @@ class TestFinlabGuard:
         assert guard.cache_dir.is_absolute()
 
         # Cleanup
+        guard.close()  # Close connections before cleanup
         if guard.cache_dir.exists():
             safe_rmtree(guard.cache_dir)
 
