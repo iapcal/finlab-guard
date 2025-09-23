@@ -230,6 +230,7 @@ class TestMockEnvironmentFeatures:
                 result = guard.get("env_test")
 
             pd.testing.assert_frame_equal(result, test_data)
+            guard.close()  # Ensure DuckDB connection is closed before cleanup
             shutil.rmtree(temp_dir)
 
         finally:
