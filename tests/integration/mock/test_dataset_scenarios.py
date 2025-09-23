@@ -47,7 +47,10 @@ class TestDatasetScenarios:
         config = {
             "compression": None
         }  # Disable compression to avoid PyArrow issues in tests
-        return FinlabGuard(cache_dir=temp_cache_dir, config=config)
+        guard_instance = FinlabGuard(cache_dir=temp_cache_dir, config=config)
+        yield guard_instance
+        # Ensure DuckDB connection is closed to prevent Windows file locking
+        guard_instance.close()
 
     @pytest.fixture
     def initial_data(self):

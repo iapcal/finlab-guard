@@ -34,7 +34,10 @@ class TestDtypeSystemIntegration:
         config = {
             "compression": None
         }  # Disable compression to avoid PyArrow issues in tests
-        return FinlabGuard(cache_dir=temp_cache_dir, config=config)
+        guard_instance = FinlabGuard(cache_dir=temp_cache_dir, config=config)
+        yield guard_instance
+        # Ensure DuckDB connection is closed to prevent Windows file locking
+        guard_instance.close()
 
     def _mock_finlab_data(self, data: pd.DataFrame):
         """Mock finlab.data.get to return specified data."""
@@ -444,7 +447,10 @@ class TestDtypeEdgeCases:
     @pytest.fixture
     def guard(self, temp_cache_dir):
         """Create FinlabGuard instance for testing."""
-        return FinlabGuard(cache_dir=temp_cache_dir)
+        guard_instance = FinlabGuard(cache_dir=temp_cache_dir)
+        yield guard_instance
+        # Ensure DuckDB connection is closed to prevent Windows file locking
+        guard_instance.close()
 
     def _mock_finlab_data(self, data: pd.DataFrame):
         """Mock finlab.data.get to return specified data."""

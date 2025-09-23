@@ -22,7 +22,10 @@ class TestFinlabDataConsistency:
     @pytest.fixture
     def guard(self, temp_cache_dir):
         """Create FinlabGuard instance with temporary cache."""
-        return FinlabGuard(cache_dir=temp_cache_dir)
+        guard_instance = FinlabGuard(cache_dir=temp_cache_dir)
+        yield guard_instance
+        # Ensure DuckDB connection is closed to prevent Windows file locking
+        guard_instance.close()
 
     def test_etl_full_cash_delivery_stock_filter_consistency(self, guard):
         """

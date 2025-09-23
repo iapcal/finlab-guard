@@ -32,7 +32,10 @@ class TestMonkeyPatchSimplified:
     @pytest.fixture
     def guard(self, temp_cache_dir):
         """Create FinlabGuard instance for testing."""
-        return FinlabGuard(cache_dir=temp_cache_dir)
+        guard_instance = FinlabGuard(cache_dir=temp_cache_dir)
+        yield guard_instance
+        # Ensure DuckDB connection is closed to prevent Windows file locking
+        guard_instance.close()
 
     @pytest.fixture(autouse=True)
     def disable_finlab_mock(self):
@@ -114,6 +117,7 @@ class TestMonkeyPatchSimplified:
 
             # Clean up
             guard2.remove_patch()
+            guard2.close()  # Ensure DuckDB connection is closed
 
         finally:
             shutil.rmtree(temp_dir2)
@@ -137,6 +141,7 @@ class TestMonkeyPatchSimplified:
             guard2 = FinlabGuard(cache_dir=temp_dir2)
             with pytest.raises(RuntimeError, match="finlab-guard already installed"):
                 guard2.install_patch()
+            guard2.close()  # Ensure DuckDB connection is closed
         finally:
             shutil.rmtree(temp_dir2)
 
@@ -198,6 +203,10 @@ class TestMonkeyPatchSimplified:
             # All should handle removing non-existent patches gracefully
             for g in guards:
                 g.remove_patch()  # Should complete without exception
+
+            # Close all guard connections
+            for g in guards:
+                g.close()  # Ensure DuckDB connections are closed
 
         finally:
             for temp_dir in temp_dirs:
@@ -275,6 +284,7 @@ class TestPatchIntegrationConcepts:
 
             # Patch removal should handle gracefully when no patch installed
             guard.remove_patch()  # Should complete without exception
+            guard.close()  # Ensure DuckDB connection is closed
 
         finally:
             shutil.rmtree(temp_dir)
@@ -292,6 +302,7 @@ class TestPatchIntegrationConcepts:
             # Test instance behavior - should handle gracefully when no patch installed
             guard = FinlabGuard(cache_dir=temp_dir)
             guard.remove_patch()  # Should complete without exception
+            guard.close()  # Ensure DuckDB connection is closed
 
         finally:
             shutil.rmtree(temp_dir)

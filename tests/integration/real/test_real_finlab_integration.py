@@ -24,7 +24,10 @@ def temp_cache_dir():
 @pytest.fixture
 def finlab_guard(temp_cache_dir):
     """Create FinlabGuard instance."""
-    return FinlabGuard(cache_dir=temp_cache_dir)
+    guard_instance = FinlabGuard(cache_dir=temp_cache_dir)
+    yield guard_instance
+    # Ensure DuckDB connection is closed to prevent Windows file locking
+    guard_instance.close()
 
 
 @pytest.mark.real_finlab
