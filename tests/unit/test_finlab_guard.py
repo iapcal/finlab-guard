@@ -405,6 +405,7 @@ class TestCoveragePhaseTesting:
 
             # Clean up any existing global state
             import finlab_guard.core.guard as guard_module
+
             guard_module._global_guard_instance = None
 
             # Ensure we start with a clean finlab mock
@@ -423,7 +424,7 @@ class TestCoveragePhaseTesting:
                 guard.install_patch(allow_historical_changes=True)
 
                 # Verify the global setting was applied
-                assert guard._allow_historical_changes == True
+                assert guard._allow_historical_changes
 
                 # Clean up
                 guard.remove_patch()
@@ -443,6 +444,7 @@ class TestCoveragePhaseTesting:
 
             # Clean up any existing global state
             import finlab_guard.core.guard as guard_module
+
             guard_module._global_guard_instance = None
 
             mock_finlab = Mock()
@@ -460,7 +462,7 @@ class TestCoveragePhaseTesting:
                 guard.install_patch(allow_historical_changes=False)
 
                 # Verify the global setting was applied
-                assert guard._allow_historical_changes == False
+                assert not guard._allow_historical_changes
 
                 # Clean up
                 guard.remove_patch()
@@ -480,6 +482,7 @@ class TestCoveragePhaseTesting:
 
             # Clean up any existing global state
             import finlab_guard.core.guard as guard_module
+
             guard_module._global_guard_instance = None
 
             mock_finlab = Mock()
@@ -497,7 +500,7 @@ class TestCoveragePhaseTesting:
                 guard.install_patch()
 
                 # Verify the global setting defaults to False
-                assert guard._allow_historical_changes == False
+                assert not guard._allow_historical_changes
 
                 # Clean up
                 guard.remove_patch()
@@ -511,6 +514,7 @@ class TestCoveragePhaseTesting:
         """Test get() method respects global allow_historical_changes setting."""
         # Clean up any existing global state
         import finlab_guard.core.guard as guard_module
+
         guard_module._global_guard_instance = None
 
         temp_dir = tempfile.mkdtemp()
@@ -547,6 +551,7 @@ class TestCoveragePhaseTesting:
         """Test get() method parameter overrides global allow_historical_changes setting."""
         # Clean up any existing global state
         import finlab_guard.core.guard as guard_module
+
         guard_module._global_guard_instance = None
 
         temp_dir = tempfile.mkdtemp()
@@ -571,7 +576,9 @@ class TestCoveragePhaseTesting:
             )
             with patch.object(guard, "_fetch_from_finlab", return_value=df2):
                 # Method parameter allow_historical_changes=False should override global True
-                with pytest.raises(DataModifiedException, match="Historical data modified"):
+                with pytest.raises(
+                    DataModifiedException, match="Historical data modified"
+                ):
                     guard.get("test_key", allow_historical_changes=False)
 
             guard.close()

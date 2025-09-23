@@ -67,10 +67,14 @@ class TestMonkeyPatchCoverage:
                 # Mock guard.get to return test data
                 with patch.object(guard, "get", return_value=test_data) as mock_get:
                     # Call the patched function - this executes line 252
-                    result = mock_finlab.data.get("test_key", allow_historical_changes=True)
+                    result = mock_finlab.data.get(
+                        "test_key", allow_historical_changes=True
+                    )
 
                     # Verify the patched function called guard.get
-                    mock_get.assert_called_once_with("test_key", allow_historical_changes=True)
+                    mock_get.assert_called_once_with(
+                        "test_key", allow_historical_changes=True
+                    )
                     pd.testing.assert_frame_equal(result, test_data)
 
                 # Clean up

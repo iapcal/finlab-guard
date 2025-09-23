@@ -807,18 +807,15 @@ class TestCacheManager:
     def test_compute_dataframe_hash_with_dtypes(self, cache_manager):
         """Test that hash distinguishes between different dtypes."""
         # Create DataFrames with same values but different dtypes
-        df_int8 = pd.DataFrame({
-            "num_col": np.array([1, 2, 3], dtype="int8"),
-            "str_col": ["a", "b", "c"]
-        })
-        df_int16 = pd.DataFrame({
-            "num_col": np.array([1, 2, 3], dtype="int16"),
-            "str_col": ["a", "b", "c"]
-        })
-        df_int32 = pd.DataFrame({
-            "num_col": np.array([1, 2, 3], dtype="int32"),
-            "str_col": ["a", "b", "c"]
-        })
+        df_int8 = pd.DataFrame(
+            {"num_col": np.array([1, 2, 3], dtype="int8"), "str_col": ["a", "b", "c"]}
+        )
+        df_int16 = pd.DataFrame(
+            {"num_col": np.array([1, 2, 3], dtype="int16"), "str_col": ["a", "b", "c"]}
+        )
+        df_int32 = pd.DataFrame(
+            {"num_col": np.array([1, 2, 3], dtype="int32"), "str_col": ["a", "b", "c"]}
+        )
 
         hash_int8 = cache_manager._compute_dataframe_hash(df_int8)
         hash_int16 = cache_manager._compute_dataframe_hash(df_int16)
@@ -871,10 +868,9 @@ class TestCacheManager:
         key = "integration_test"
         timestamp = datetime.now()
 
-        df = pd.DataFrame({
-            "num_col": np.array([1, 2, 3], dtype="int16"),
-            "str_col": ["x", "y", "z"]
-        })
+        df = pd.DataFrame(
+            {"num_col": np.array([1, 2, 3], dtype="int16"), "str_col": ["x", "y", "z"]}
+        )
 
         # Save data (should automatically save hash)
         cache_manager.save_data(key, df, timestamp)
@@ -906,14 +902,12 @@ class TestCacheManager:
 
     def test_hash_with_special_values(self, cache_manager):
         """Test hash computation with NaN, None, and special values."""
-        df_with_nan = pd.DataFrame({
-            "float_col": [1.0, np.nan, 3.0],
-            "obj_col": ["a", None, "c"]
-        })
-        df_without_nan = pd.DataFrame({
-            "float_col": [1.0, 2.0, 3.0],
-            "obj_col": ["a", "b", "c"]
-        })
+        df_with_nan = pd.DataFrame(
+            {"float_col": [1.0, np.nan, 3.0], "obj_col": ["a", None, "c"]}
+        )
+        df_without_nan = pd.DataFrame(
+            {"float_col": [1.0, 2.0, 3.0], "obj_col": ["a", "b", "c"]}
+        )
 
         hash_with_nan = cache_manager._compute_dataframe_hash(df_with_nan)
         hash_without_nan = cache_manager._compute_dataframe_hash(df_without_nan)

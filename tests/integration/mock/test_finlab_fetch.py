@@ -51,7 +51,9 @@ class TestFinlabFetch:
                 result = guard._fetch_from_finlab("test_key")
 
                 # Verify _original_get was called with finlab API parameters
-                mock_finlab.data._original_get.assert_called_once_with("test_key", save_to_storage=True, force_download=False)
+                mock_finlab.data._original_get.assert_called_once_with(
+                    "test_key", save_to_storage=True, force_download=False
+                )
                 mock_finlab.data.get.assert_not_called()
 
                 pd.testing.assert_frame_equal(result, test_data)

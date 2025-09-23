@@ -232,11 +232,13 @@ class CacheManager:
 
         # Include dtype information to distinguish int8 vs int16 etc.
         content = (
-            df.values.tobytes() +
-            str(df.index.tolist()).encode() +
-            str(df.columns.tolist()).encode() +
-            str({col: str(df[col].dtype) for col in df.columns}).encode() +  # Add dtype info
-            str(df.index.dtype).encode()  # Add index dtype
+            df.values.tobytes()
+            + str(df.index.tolist()).encode()
+            + str(df.columns.tolist()).encode()
+            + str(
+                {col: str(df[col].dtype) for col in df.columns}
+            ).encode()  # Add dtype info
+            + str(df.index.dtype).encode()  # Add index dtype
         )
 
         return hashlib.sha256(content).hexdigest()
@@ -256,7 +258,7 @@ class CacheManager:
                 INSERT OR REPLACE INTO data_hashes (table_id, data_hash, save_time)
                 VALUES (?, ?, ?)
                 """,
-                [key, hash_value, timestamp]
+                [key, hash_value, timestamp],
             )
             logger.debug(f"Saved hash for {key}: {hash_value[:8]}...")
         except Exception as e:
@@ -686,8 +688,10 @@ class CacheManager:
             base_wide_pdf = pd.json_normalize(parsed)
 
             if not base_wide_pdf.empty:
-                base_wide_pdf['row_key'] = row_keys
-                base_pl = pl.from_pandas(base_wide_pdf).with_columns(pl.col("row_key").cast(pl.Utf8))
+                base_wide_pdf["row_key"] = row_keys
+                base_pl = pl.from_pandas(base_wide_pdf).with_columns(
+                    pl.col("row_key").cast(pl.Utf8)
+                )
             else:
                 base_pl = pl.DataFrame({"row_key": pl.Series(row_keys, dtype=pl.Utf8)})
         else:
@@ -706,19 +710,27 @@ class CacheManager:
         # Simplified arrow handling
         try:
             changes_arrow = self.conn.execute(q_changes_latest).arrow()
-            if hasattr(changes_arrow, 'read_all'):
+            if hasattr(changes_arrow, "read_all"):
                 changes_arrow = changes_arrow.read_all()
-            changes_pl = pl.from_arrow(changes_arrow) if changes_arrow.num_rows > 0 else pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
+            changes_pl = (
+                pl.from_arrow(changes_arrow)
+                if changes_arrow.num_rows > 0
+                else pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
+            )
         except Exception:
             changes_pdf = self.conn.execute(q_changes_latest).fetchdf()
-            changes_pl = pl.from_pandas(changes_pdf) if not changes_pdf.empty else pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
+            changes_pl = (
+                pl.from_pandas(changes_pdf)
+                if not changes_pdf.empty
+                else pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
+            )
 
         # Process cell changes and pivot
         if not changes_pl.is_empty():
             # Parse JSON values in pandas (more flexible for mixed types)
             changes_pd = changes_pl.to_pandas()
 
-            def parse_json_value(x):
+            def parse_json_value(x: Any) -> Any:
                 if x is None:
                     return None
                 if isinstance(x, (int, float, bool)):
@@ -727,32 +739,52 @@ class CacheManager:
                     # Try JSON parsing with smart number conversion
                     try:
                         parsed = orjson.loads(x) if x else None
-                        if isinstance(parsed, str) and parsed.replace('.','').replace('-','').isdigit():
-                            return float(parsed) if '.' in parsed else int(parsed)
+                        if (
+                            isinstance(parsed, str)
+                            and parsed.replace(".", "").replace("-", "").isdigit()
+                        ):
+                            return float(parsed) if "." in parsed else int(parsed)
                         return parsed
                     except Exception:
                         try:
                             parsed = json.loads(x) if x else None
-                            if isinstance(parsed, str) and parsed.replace('.','').replace('-','').isdigit():
-                                return float(parsed) if '.' in parsed else int(parsed)
+                            if (
+                                isinstance(parsed, str)
+                                and parsed.replace(".", "").replace("-", "").isdigit()
+                            ):
+                                return float(parsed) if "." in parsed else int(parsed)
                             return parsed
                         except Exception:
-                            if x.replace('.','').replace('-','').isdigit():
-                                return float(x) if '.' in x else int(x)
+                            if x.replace(".", "").replace("-", "").isdigit():
+                                return float(x) if "." in x else int(x)
                             return x
                 return x
 
             changes_pd["value"] = changes_pd["value"].apply(parse_json_value)
-            changes_pl = pl.from_pandas(changes_pd)
+            changes_pl_result = pl.from_pandas(changes_pd)
+            # Ensure we have a DataFrame, not a Series
+            if isinstance(changes_pl_result, pl.DataFrame):
+                changes_pl = changes_pl_result
+            else:
+                # Convert Series to DataFrame if needed
+                changes_pl = pl.DataFrame({"value": changes_pl_result})
 
             # Simplified pivot with single try
             try:
-                pivot_pl = changes_pl.pivot(on="col_key", index="row_key", values="value", aggregate_function="first")
+                pivot_pl = changes_pl.pivot(
+                    on="col_key",
+                    index="row_key",
+                    values="value",
+                    aggregate_function="first",
+                )
             except Exception:
                 # If pivot fails, use groupby fallback
-                pivot_pl = (changes_pl.group_by(["row_key", "col_key"])
-                           .agg(pl.col("value").first())
-                           .pivot(on="col_key", index="row_key", values="value"))
+                grouped_pl = changes_pl.group_by(["row_key", "col_key"]).agg(
+                    pl.col("value").first()
+                )
+                pivot_pl = grouped_pl.pivot(
+                    on="col_key", index="row_key", values="value"
+                )
 
             # Rename pivot columns to indicate delta
             pivot_cols = [c for c in pivot_pl.columns if c != "row_key"]
@@ -780,9 +812,13 @@ class CacheManager:
             adds_wide_pdf = pd.json_normalize(parsed_adds)
             if not adds_wide_pdf.empty:
                 adds_wide_pdf["row_key"] = add_row_keys
-                adds_pl = pl.from_pandas(adds_wide_pdf).with_columns(pl.col("row_key").cast(pl.Utf8))
+                adds_pl = pl.from_pandas(adds_wide_pdf).with_columns(
+                    pl.col("row_key").cast(pl.Utf8)
+                )
             else:
-                adds_pl = pl.DataFrame({"row_key": pl.Series(add_row_keys, dtype=pl.Utf8)})
+                adds_pl = pl.DataFrame(
+                    {"row_key": pl.Series(add_row_keys, dtype=pl.Utf8)}
+                )
         else:
             adds_pl = pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
 
@@ -801,7 +837,9 @@ class CacheManager:
         for delta_col in delta_cols:
             target_col = delta_col[: -len("__delta")]
             if target_col in merged.columns:
-                merged = merged.with_columns(pl.coalesce(pl.col(delta_col), pl.col(target_col)).alias(target_col))
+                merged = merged.with_columns(
+                    pl.coalesce(pl.col(delta_col), pl.col(target_col)).alias(target_col)
+                )
             else:
                 merged = merged.rename({delta_col: target_col})
 
@@ -818,7 +856,9 @@ class CacheManager:
             # Handle row_key from add join
             if "row_key_add" in merged.columns:
                 merged = merged.with_columns(
-                    pl.coalesce(pl.col("row_key"), pl.col("row_key_add")).alias("row_key")
+                    pl.coalesce(pl.col("row_key"), pl.col("row_key_add")).alias(
+                        "row_key"
+                    )
                 ).drop("row_key_add")
 
             # Apply add columns
@@ -827,7 +867,9 @@ class CacheManager:
                 add_col = f"{c}_add"
                 if add_col in merged.columns:
                     if c in merged.columns:
-                        merged = merged.with_columns(pl.coalesce(pl.col(add_col), pl.col(c)).alias(c))
+                        merged = merged.with_columns(
+                            pl.coalesce(pl.col(add_col), pl.col(c)).alias(c)
+                        )
                     else:
                         merged = merged.rename({add_col: c})
 
@@ -844,7 +886,11 @@ class CacheManager:
         result_pdf = merged.to_pandas()
 
         # Clean up any remaining duplicate row_key columns
-        duplicate_cols = [col for col in result_pdf.columns if col.startswith('row_key') and col != 'row_key']
+        duplicate_cols = [
+            col
+            for col in result_pdf.columns
+            if col.startswith("row_key") and col != "row_key"
+        ]
         if duplicate_cols:
             result_pdf = result_pdf.drop(columns=duplicate_cols)
 
@@ -855,7 +901,9 @@ class CacheManager:
                 numeric_sort_key = pd.to_numeric(result_pdf["row_key"], errors="coerce")
                 if not numeric_sort_key.isna().all():
                     result_pdf["_sort_key"] = numeric_sort_key
-                    result_pdf = result_pdf.sort_values("_sort_key").drop("_sort_key", axis=1)
+                    result_pdf = result_pdf.sort_values("_sort_key").drop(
+                        "_sort_key", axis=1
+                    )
                 else:
                     result_pdf = result_pdf.sort_values("row_key")
             except Exception:

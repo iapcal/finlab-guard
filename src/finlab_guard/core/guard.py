@@ -118,7 +118,13 @@ class FinlabGuard:
 
         return now
 
-    def get(self, dataset: str, save_to_storage: bool = True, force_download: bool = False, allow_historical_changes: Optional[bool] = None) -> pd.DataFrame:
+    def get(
+        self,
+        dataset: str,
+        save_to_storage: bool = True,
+        force_download: bool = False,
+        allow_historical_changes: Optional[bool] = None,
+    ) -> pd.DataFrame:
         """
         Get data with caching and change detection.
 
@@ -217,7 +223,9 @@ class FinlabGuard:
                 logger.info(f"No new data to cache for {key}")
             return new_data
 
-    def _fetch_from_finlab(self, key: str, save_to_storage: bool = True, force_download: bool = False) -> pd.DataFrame:
+    def _fetch_from_finlab(
+        self, key: str, save_to_storage: bool = True, force_download: bool = False
+    ) -> pd.DataFrame:
         """
         Fetch data from finlab using original function.
 
@@ -235,9 +243,13 @@ class FinlabGuard:
             # If a patched original exists, call that; otherwise call get.
             # Pass through the original API parameters
             if hasattr(finlab.data, "_original_get"):
-                result = finlab.data._original_get(key, save_to_storage=save_to_storage, force_download=force_download)
+                result = finlab.data._original_get(
+                    key, save_to_storage=save_to_storage, force_download=force_download
+                )
             else:
-                result = finlab.data.get(key, save_to_storage=save_to_storage, force_download=force_download)
+                result = finlab.data.get(
+                    key, save_to_storage=save_to_storage, force_download=force_download
+                )
 
             # Ensure we return a DataFrame (finlab API should return one)
             if isinstance(result, pd.DataFrame):
