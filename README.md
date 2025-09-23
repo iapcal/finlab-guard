@@ -7,9 +7,9 @@ A lightweight package for managing a local finlab data cache with versioning and
 ![Linux](https://img.shields.io/badge/OS-Linux-FCC624?logo=linux&logoColor=black)
 ![macOS](https://img.shields.io/badge/OS-macOS-000000?logo=apple&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Build](https://github.com/iapcal/finlab-guard/actions/workflows/build.yml/badge.svg)](https://github.com/iapcal/finlab-guard/actions/workflows/build.yml)
-[![Lint](https://github.com/iapcal/finlab-guard/actions/workflows/lint.yml/badge.svg)](https://github.com/iapcal/finlab-guard/actions/workflows/lint.yml)
-[![codecov](https://codecov.io/gh/iapcal/finlab-guard/branch/main/graph/badge.svg)](https://codecov.io/gh/iapcal/finlab-guard)
+[![build](https://github.com/iapcal/finlab-guard/actions/workflows/build.yml/badge.svg)](https://github.com/iapcal/finlab-guard/actions/workflows/build.yml)
+[![lint](https://github.com/iapcal/finlab-guard/actions/workflows/lint.yml/badge.svg)](https://github.com/iapcal/finlab-guard/actions/workflows/lint.yml)
+[![coverage](https://img.shields.io/codecov/c/github/iapcal/finlab-guard)](https://codecov.io/gh/iapcal/finlab-guard)
 
 ## Installation
 
