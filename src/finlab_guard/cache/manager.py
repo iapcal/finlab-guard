@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import duckdb
+import orjson
 import pandas as pd
 import polars as pl
 
@@ -567,9 +568,28 @@ class CacheManager:
         }
         return cell_df, row_df, meta
 
+    def _parse_json_batch(self, json_strings: list[str]) -> list[dict]:
+        """Parse JSON strings with orjson -> json fallback."""
+        parsed = []
+        for s in json_strings:
+            try:
+                parsed.append(orjson.loads(s) if s else {})
+            except Exception:
+                try:
+                    parsed.append(json.loads(s) if s else {})
+                except Exception:
+                    parsed.append({})
+        return parsed
+
     def reconstruct_as_of(self, table_id: str, target_time: datetime) -> pd.DataFrame:
-        """Reconstruct DataFrame as of target_time using DuckDB queries."""
-        # 1) Latest snapshot - get all rows from the most recent snapshot
+        """
+        Faster reconstruct using DuckDB -> Arrow -> Polars pivot + Polars joins.
+        Replaces Python-level dict assembly and pd.DataFrame.from_dict().
+
+        Returns pandas.DataFrame (index = row_key strings).
+        """
+
+        # 1) load latest snapshot row_data (JSON) for the table (as pandas)
         q_snap = f"""
         SELECT row_key, row_data FROM rows_base
         WHERE table_id = '{table_id}' AND snapshot_time = (
@@ -578,51 +598,200 @@ class CacheManager:
         )
         """
         base_df = self.conn.execute(q_snap).fetchdf()
-        base_dict: dict[str, dict[str, Any]] = {}
-        for _, r in base_df.iterrows():
-            base_dict[str(r["row_key"])] = (
-                json.loads(r["row_data"]) if r["row_data"] is not None else {}
-            )
 
-        # 2) Apply row additions (both new rows and partial row updates)
+        # Convert base snapshot JSON column into a wide DataFrame
+        if not base_df.empty:
+            row_keys = base_df["row_key"].to_list()
+            raw_json = base_df["row_data"].fillna("{}").to_list()
+            parsed = self._parse_json_batch(raw_json)
+
+            # normalize to wide table (C-optimized)
+            base_wide_pdf = pd.json_normalize(parsed)
+
+            if not base_wide_pdf.empty:
+                base_wide_pdf['row_key'] = row_keys
+                base_pl = pl.from_pandas(base_wide_pdf).with_columns(pl.col("row_key").cast(pl.Utf8))
+            else:
+                base_pl = pl.DataFrame({"row_key": pl.Series(row_keys, dtype=pl.Utf8)})
+        else:
+            base_pl = pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
+
+        # 2) fetch latest cell_changes per (row_key, col_key) up to target_time
+        q_changes_latest = f"""
+        SELECT row_key, col_key, value FROM (
+            SELECT row_key, col_key, value,
+                row_number() OVER (PARTITION BY row_key, col_key ORDER BY save_time DESC) as rn
+            FROM cell_changes
+            WHERE table_id = '{table_id}' AND save_time <= TIMESTAMP '{target_time.isoformat()}'
+        ) t WHERE rn = 1
+        """
+
+        # Simplified arrow handling
+        try:
+            changes_arrow = self.conn.execute(q_changes_latest).arrow()
+            if hasattr(changes_arrow, 'read_all'):
+                changes_arrow = changes_arrow.read_all()
+            changes_pl = pl.from_arrow(changes_arrow) if changes_arrow.num_rows > 0 else pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
+        except Exception:
+            changes_pdf = self.conn.execute(q_changes_latest).fetchdf()
+            changes_pl = pl.from_pandas(changes_pdf) if not changes_pdf.empty else pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
+
+        # Process cell changes and pivot
+        if not changes_pl.is_empty():
+            # Parse JSON values in pandas (more flexible for mixed types)
+            changes_pd = changes_pl.to_pandas()
+
+            def parse_json_value(x):
+                if x is None:
+                    return None
+                if isinstance(x, (int, float, bool)):
+                    return x
+                if isinstance(x, str):
+                    # Try JSON parsing with smart number conversion
+                    try:
+                        parsed = orjson.loads(x) if x else None
+                        if isinstance(parsed, str) and parsed.replace('.','').replace('-','').isdigit():
+                            return float(parsed) if '.' in parsed else int(parsed)
+                        return parsed
+                    except Exception:
+                        try:
+                            parsed = json.loads(x) if x else None
+                            if isinstance(parsed, str) and parsed.replace('.','').replace('-','').isdigit():
+                                return float(parsed) if '.' in parsed else int(parsed)
+                            return parsed
+                        except Exception:
+                            if x.replace('.','').replace('-','').isdigit():
+                                return float(x) if '.' in x else int(x)
+                            return x
+                return x
+
+            changes_pd["value"] = changes_pd["value"].apply(parse_json_value)
+            changes_pl = pl.from_pandas(changes_pd)
+
+            # Simplified pivot with single try
+            try:
+                pivot_pl = changes_pl.pivot(on="col_key", index="row_key", values="value", aggregate_function="first")
+            except Exception:
+                # If pivot fails, use groupby fallback
+                pivot_pl = (changes_pl.group_by(["row_key", "col_key"])
+                           .agg(pl.col("value").first())
+                           .pivot(on="col_key", index="row_key", values="value"))
+
+            # Rename pivot columns to indicate delta
+            pivot_cols = [c for c in pivot_pl.columns if c != "row_key"]
+            if pivot_cols:
+                pivot_rename_map = {c: f"{c}__delta" for c in pivot_cols}
+                pivot_pl = pivot_pl.rename(pivot_rename_map)
+
+            # Ensure row_key is string type
+            pivot_pl = pivot_pl.with_columns(pl.col("row_key").cast(pl.Utf8))
+        else:
+            pivot_pl = pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
+
+        # 3) fetch row_additions up to target_time and normalize
         q_add = f"""
         SELECT row_key, row_data FROM row_additions
         WHERE table_id = '{table_id}' AND save_time <= TIMESTAMP '{target_time.isoformat()}'
         ORDER BY save_time ASC
         """
-        adds = self.conn.execute(q_add).fetchdf()
-        for _, r in adds.iterrows():
-            rk = str(r["row_key"])
-            row_data = json.loads(r["row_data"]) if r["row_data"] is not None else {}
-            if isinstance(row_data, dict):
-                if rk not in base_dict:
-                    base_dict[rk] = {}
-                base_dict[rk].update(row_data)  # Merge for partial updates
+        adds_df = self.conn.execute(q_add).fetchdf()
+        if not adds_df.empty:
+            add_row_keys = adds_df["row_key"].to_list()
+            raw_adds = adds_df["row_data"].fillna("{}").to_list()
+            parsed_adds = self._parse_json_batch(raw_adds)
 
-        # 3) Latest cell changes per (row_key, col_key)
-        q_changes = f"""
-        SELECT row_key, col_key, value FROM (
-            SELECT row_key, col_key, value,
-                   row_number() OVER (PARTITION BY row_key, col_key ORDER BY save_time DESC) as rn
-            FROM cell_changes
-            WHERE table_id = '{table_id}' AND save_time <= TIMESTAMP '{target_time.isoformat()}'
-        ) t WHERE rn = 1
-        """
-        changes = self.conn.execute(q_changes).fetchdf()
-        for _, r in changes.iterrows():
-            rk = str(r["row_key"]) if r["row_key"] is not None else ""
-            ck = str(r["col_key"]) if r["col_key"] is not None else ""
-            v_json = r["value"]
-            v = json.loads(v_json) if v_json is not None else None
-            if rk not in base_dict:
-                base_dict[rk] = {}
-            base_dict[rk][ck] = v
+            adds_wide_pdf = pd.json_normalize(parsed_adds)
+            if not adds_wide_pdf.empty:
+                adds_wide_pdf["row_key"] = add_row_keys
+                adds_pl = pl.from_pandas(adds_wide_pdf).with_columns(pl.col("row_key").cast(pl.Utf8))
+            else:
+                adds_pl = pl.DataFrame({"row_key": pl.Series(add_row_keys, dtype=pl.Utf8)})
+        else:
+            adds_pl = pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
 
-        if not base_dict:
+        # 4) Merge layers: base_pl (snapshot) <- pivot_pl (cell_changes) <- adds_pl (row_additions)
+        # All DataFrames already have row_key as Utf8, so join directly
+        merged = base_pl.join(pivot_pl, on="row_key", how="full")
+
+        # Handle row_key from joins
+        if "row_key_right" in merged.columns:
+            merged = merged.with_columns(
+                pl.coalesce(pl.col("row_key"), pl.col("row_key_right")).alias("row_key")
+            ).drop("row_key_right")
+
+        # Apply delta columns from pivot
+        delta_cols = [c for c in merged.columns if c.endswith("__delta")]
+        for delta_col in delta_cols:
+            target_col = delta_col[: -len("__delta")]
+            if target_col in merged.columns:
+                merged = merged.with_columns(pl.coalesce(pl.col(delta_col), pl.col(target_col)).alias(target_col))
+            else:
+                merged = merged.rename({delta_col: target_col})
+
+        # Drop all remaining __delta columns
+        if delta_cols:
+            remaining_deltas = [c for c in merged.columns if c.endswith("__delta")]
+            if remaining_deltas:
+                merged = merged.drop(remaining_deltas)
+
+        # Apply adds_pl: join and coalesce (adds have higher precedence)
+        if not adds_pl.is_empty():
+            merged = merged.join(adds_pl, on="row_key", how="full", suffix="_add")
+
+            # Handle row_key from add join
+            if "row_key_add" in merged.columns:
+                merged = merged.with_columns(
+                    pl.coalesce(pl.col("row_key"), pl.col("row_key_add")).alias("row_key")
+                ).drop("row_key_add")
+
+            # Apply add columns
+            add_cols = [c for c in adds_pl.columns if c != "row_key"]
+            for c in add_cols:
+                add_col = f"{c}_add"
+                if add_col in merged.columns:
+                    if c in merged.columns:
+                        merged = merged.with_columns(pl.coalesce(pl.col(add_col), pl.col(c)).alias(c))
+                    else:
+                        merged = merged.rename({add_col: c})
+
+            # Clean up remaining _add columns
+            remaining_adds = [c for c in merged.columns if c.endswith("_add")]
+            if remaining_adds:
+                merged = merged.drop(remaining_adds)
+
+        # 5) Convert to pandas and finalize
+        if merged.is_empty():
             return pd.DataFrame()
 
-        df = pd.DataFrame.from_dict(base_dict, orient="index")
-        return df
+        # Convert to pandas
+        result_pdf = merged.to_pandas()
+
+        # Clean up any remaining duplicate row_key columns
+        duplicate_cols = [col for col in result_pdf.columns if col.startswith('row_key') and col != 'row_key']
+        if duplicate_cols:
+            result_pdf = result_pdf.drop(columns=duplicate_cols)
+
+        # Set row_key as index with smart sorting
+        if "row_key" in result_pdf.columns:
+            # Smart sort: numeric if possible, otherwise string
+            try:
+                numeric_sort_key = pd.to_numeric(result_pdf["row_key"], errors="coerce")
+                if not numeric_sort_key.isna().all():
+                    result_pdf["_sort_key"] = numeric_sort_key
+                    result_pdf = result_pdf.sort_values("_sort_key").drop("_sort_key", axis=1)
+                else:
+                    result_pdf = result_pdf.sort_values("row_key")
+            except Exception:
+                result_pdf = result_pdf.sort_values("row_key")
+
+            result_pdf.set_index("row_key", inplace=True)
+            result_pdf.index.name = None
+
+        # Filter out invalid rows
+        if not result_pdf.empty:
+            result_pdf = result_pdf[result_pdf.index.notna()]
+
+        return result_pdf
 
     def compact_up_to(
         self,
