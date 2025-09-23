@@ -787,3 +787,138 @@ class TestCacheManager:
 
         # Note: Due to JSON serialization, exact type matching may vary
         # but the data should be reconstructible
+
+    def test_compute_dataframe_hash(self, cache_manager):
+        """Test DataFrame hash computation with different data types and dtypes."""
+        # Test basic hash computation
+        df1 = pd.DataFrame({"col": [1, 2, 3]})
+        df2 = pd.DataFrame({"col": [1, 2, 3]})  # Same data
+        df3 = pd.DataFrame({"col": [1, 2, 4]})  # Different data
+
+        hash1 = cache_manager._compute_dataframe_hash(df1)
+        hash2 = cache_manager._compute_dataframe_hash(df2)
+        hash3 = cache_manager._compute_dataframe_hash(df3)
+
+        # Same data should produce same hash
+        assert hash1 == hash2
+        # Different data should produce different hash
+        assert hash1 != hash3
+
+    def test_compute_dataframe_hash_with_dtypes(self, cache_manager):
+        """Test that hash distinguishes between different dtypes."""
+        # Create DataFrames with same values but different dtypes
+        df_int8 = pd.DataFrame({
+            "num_col": np.array([1, 2, 3], dtype="int8"),
+            "str_col": ["a", "b", "c"]
+        })
+        df_int16 = pd.DataFrame({
+            "num_col": np.array([1, 2, 3], dtype="int16"),
+            "str_col": ["a", "b", "c"]
+        })
+        df_int32 = pd.DataFrame({
+            "num_col": np.array([1, 2, 3], dtype="int32"),
+            "str_col": ["a", "b", "c"]
+        })
+
+        hash_int8 = cache_manager._compute_dataframe_hash(df_int8)
+        hash_int16 = cache_manager._compute_dataframe_hash(df_int16)
+        hash_int32 = cache_manager._compute_dataframe_hash(df_int32)
+
+        # Different dtypes should produce different hashes
+        assert hash_int8 != hash_int16
+        assert hash_int16 != hash_int32
+        assert hash_int8 != hash_int32
+
+    def test_compute_dataframe_hash_with_index_types(self, cache_manager):
+        """Test that hash includes index dtype information."""
+        df1 = pd.DataFrame({"col": [10, 20, 30]}, index=[1, 2, 3])  # int index
+        df2 = pd.DataFrame({"col": [10, 20, 30]}, index=["1", "2", "3"])  # str index
+
+        hash1 = cache_manager._compute_dataframe_hash(df1)
+        hash2 = cache_manager._compute_dataframe_hash(df2)
+
+        # Different index types should produce different hashes
+        assert hash1 != hash2
+
+    def test_compute_dataframe_hash_empty(self, cache_manager):
+        """Test hash computation for empty DataFrame."""
+        df_empty = pd.DataFrame()
+        hash_empty = cache_manager._compute_dataframe_hash(df_empty)
+
+        # Should return a consistent hash for empty DataFrames
+        assert isinstance(hash_empty, str)
+        assert len(hash_empty) == 64  # SHA256 hex length
+
+    def test_save_and_get_data_hash(self, cache_manager):
+        """Test saving and retrieving data hash."""
+        key = "hash_test"
+        test_hash = "abc123def456"
+        timestamp = datetime.now()
+
+        # Test saving hash
+        cache_manager._save_data_hash(key, test_hash, timestamp)
+
+        # Test retrieving hash
+        retrieved_hash = cache_manager._get_data_hash(key)
+        assert retrieved_hash == test_hash
+
+        # Test non-existent key
+        non_existent_hash = cache_manager._get_data_hash("non_existent")
+        assert non_existent_hash is None
+
+    def test_data_hash_integration_with_save_data(self, cache_manager):
+        """Test that save_data automatically saves hash."""
+        key = "integration_test"
+        timestamp = datetime.now()
+
+        df = pd.DataFrame({
+            "num_col": np.array([1, 2, 3], dtype="int16"),
+            "str_col": ["x", "y", "z"]
+        })
+
+        # Save data (should automatically save hash)
+        cache_manager.save_data(key, df, timestamp)
+
+        # Verify hash was saved
+        saved_hash = cache_manager._get_data_hash(key)
+        assert saved_hash is not None
+
+        # Verify hash matches computed hash
+        computed_hash = cache_manager._compute_dataframe_hash(df)
+        assert saved_hash == computed_hash
+
+    def test_clear_operations_remove_hash(self, cache_manager):
+        """Test that clear operations also remove stored hashes."""
+        key = "clear_test"
+        timestamp = datetime.now()
+
+        df = pd.DataFrame({"col": [1, 2, 3]})
+        cache_manager.save_data(key, df, timestamp)
+
+        # Verify hash exists
+        assert cache_manager._get_data_hash(key) is not None
+
+        # Clear specific key
+        cache_manager.clear_key(key)
+
+        # Verify hash is removed
+        assert cache_manager._get_data_hash(key) is None
+
+    def test_hash_with_special_values(self, cache_manager):
+        """Test hash computation with NaN, None, and special values."""
+        df_with_nan = pd.DataFrame({
+            "float_col": [1.0, np.nan, 3.0],
+            "obj_col": ["a", None, "c"]
+        })
+        df_without_nan = pd.DataFrame({
+            "float_col": [1.0, 2.0, 3.0],
+            "obj_col": ["a", "b", "c"]
+        })
+
+        hash_with_nan = cache_manager._compute_dataframe_hash(df_with_nan)
+        hash_without_nan = cache_manager._compute_dataframe_hash(df_without_nan)
+
+        # DataFrames with different NaN patterns should have different hashes
+        assert hash_with_nan != hash_without_nan
+        assert isinstance(hash_with_nan, str)
+        assert len(hash_with_nan) == 64

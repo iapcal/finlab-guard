@@ -154,6 +154,15 @@ class FinlabGuard:
             logger.info(f"First time caching data for {key}")
             return new_data
 
+        # **Hash optimization: Quick comparison before detailed diff**
+        new_hash = self.cache_manager._compute_dataframe_hash(new_data)
+        cached_hash = self.cache_manager._get_data_hash(key)
+
+        if cached_hash and new_hash == cached_hash:
+            # Hash match → data unchanged → return new data directly
+            logger.info(f"Data unchanged for {key} (hash match), returning new data")
+            return new_data
+
         # Detect changes
         modifications, additions = self.validator.detect_changes_detailed(
             key, new_data, self.cache_manager

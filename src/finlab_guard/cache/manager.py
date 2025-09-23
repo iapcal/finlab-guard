@@ -116,6 +116,17 @@ class CacheManager:
             """
         )
 
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS data_hashes (
+                table_id VARCHAR,
+                data_hash VARCHAR,
+                save_time TIMESTAMP,
+                PRIMARY KEY (table_id)
+            );
+            """
+        )
+
         # Create indexes for performance
         try:
             self.conn.execute(
@@ -203,6 +214,72 @@ class CacheManager:
             json.dump(dtype_mapping, f, indent=2)
 
         logger.debug(f"Saved new dtype entry for {key} at {new_entry['timestamp']}")
+
+    def _compute_dataframe_hash(self, df: pd.DataFrame) -> str:
+        """
+        Calculate DataFrame hash value including dtype information.
+
+        Args:
+            df: DataFrame to hash
+
+        Returns:
+            SHA256 hex string of the DataFrame
+        """
+        import hashlib
+
+        if df.empty:
+            return hashlib.sha256(b"empty_dataframe").hexdigest()
+
+        # Include dtype information to distinguish int8 vs int16 etc.
+        content = (
+            df.values.tobytes() +
+            str(df.index.tolist()).encode() +
+            str(df.columns.tolist()).encode() +
+            str({col: str(df[col].dtype) for col in df.columns}).encode() +  # Add dtype info
+            str(df.index.dtype).encode()  # Add index dtype
+        )
+
+        return hashlib.sha256(content).hexdigest()
+
+    def _save_data_hash(self, key: str, hash_value: str, timestamp: datetime) -> None:
+        """
+        Save or update data hash.
+
+        Args:
+            key: Dataset key
+            hash_value: SHA256 hash of the data
+            timestamp: Save timestamp
+        """
+        try:
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO data_hashes (table_id, data_hash, save_time)
+                VALUES (?, ?, ?)
+                """,
+                [key, hash_value, timestamp]
+            )
+            logger.debug(f"Saved hash for {key}: {hash_value[:8]}...")
+        except Exception as e:
+            logger.error(f"Failed to save hash for {key}: {e}")
+
+    def _get_data_hash(self, key: str) -> Optional[str]:
+        """
+        Get cached data hash.
+
+        Args:
+            key: Dataset key
+
+        Returns:
+            Hash value if exists, None otherwise
+        """
+        try:
+            result = self.conn.execute(
+                "SELECT data_hash FROM data_hashes WHERE table_id = ?", [key]
+            ).fetchone()
+            return result[0] if result else None
+        except Exception as e:
+            logger.error(f"Failed to get hash for {key}: {e}")
+            return None
 
     def _needs_new_dtype_entry(
         self,
@@ -1027,6 +1104,11 @@ class CacheManager:
                 self.save_snapshot(key, data, timestamp)
                 logger.debug(f"Created fallback snapshot for {key}")
 
+        # Calculate and save data hash with current time (separate from data timestamp)
+        data_hash = self._compute_dataframe_hash(data)
+        hash_timestamp = datetime.now()  # Use current time, not data timestamp
+        self._save_data_hash(key, data_hash, hash_timestamp)
+
     def save_incremental_changes(
         self,
         key: str,
@@ -1078,6 +1160,11 @@ class CacheManager:
         logger.debug(
             f"Saved {len(cell_changes_rows)} incremental changes for {key} to DuckDB"
         )
+
+        # Calculate and save data hash with current time (separate from data timestamp)
+        data_hash = self._compute_dataframe_hash(original_df)
+        hash_timestamp = datetime.now()  # Use current time, not data timestamp
+        self._save_data_hash(key, data_hash, hash_timestamp)
 
     def load_data(
         self, key: str, as_of_time: Optional[datetime] = None
@@ -1184,6 +1271,7 @@ class CacheManager:
             self.conn.execute(f"DELETE FROM rows_base WHERE table_id = '{key}'")
             self.conn.execute(f"DELETE FROM cell_changes WHERE table_id = '{key}'")
             self.conn.execute(f"DELETE FROM row_additions WHERE table_id = '{key}'")
+            self.conn.execute(f"DELETE FROM data_hashes WHERE table_id = '{key}'")
 
             # Also clear dtype mapping file for compatibility
             dtype_path = self._get_dtype_path(key)
@@ -1201,6 +1289,7 @@ class CacheManager:
             self.conn.execute("DELETE FROM rows_base")
             self.conn.execute("DELETE FROM cell_changes")
             self.conn.execute("DELETE FROM row_additions")
+            self.conn.execute("DELETE FROM data_hashes")
 
             # Clear all dtype mapping files
             if self.cache_dir.exists():
