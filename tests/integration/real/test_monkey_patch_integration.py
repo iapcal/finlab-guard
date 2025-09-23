@@ -38,7 +38,10 @@ class TestMonkeyPatchIntegration:
     def guard(self, temp_cache_dir):
         """Create FinlabGuard instance for testing."""
         config = {"compression": "snappy"}
-        return FinlabGuard(cache_dir=temp_cache_dir, config=config)
+        guard_instance = FinlabGuard(cache_dir=temp_cache_dir, config=config)
+        yield guard_instance
+        # Ensure DuckDB connection is closed to prevent Windows file locking
+        guard_instance.close()
 
     @pytest.fixture(autouse=True)
     def cleanup_patches(self):
@@ -183,6 +186,7 @@ class TestMonkeyPatchIntegration:
 
                 # Clean up
                 guard2.remove_patch()
+            guard2.close()  # Ensure DuckDB connection is closed
 
         finally:
             shutil.rmtree(temp_dir2)
@@ -243,6 +247,10 @@ class TestMonkeyPatchIntegration:
                         break
                     except Exception:
                         continue
+
+                # Close all guard connections
+                for g in guards:
+                    g.close()  # Ensure DuckDB connections are closed
 
             finally:
                 for temp_dir in temp_dirs:
@@ -435,6 +443,8 @@ class TestPatchStatePersistence:
 
             # Clean up
             guard2.remove_patch()
+            guard1.close()  # Ensure DuckDB connections are closed
+            guard2.close()
 
     def test_global_singleton_behavior(self, temp_cache_dir):
         """
@@ -468,3 +478,5 @@ class TestPatchStatePersistence:
 
             # Clean up
             guard2.remove_patch()
+            guard1.close()  # Ensure DuckDB connections are closed
+            guard2.close()
