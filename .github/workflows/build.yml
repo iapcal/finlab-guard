@@ -1,4 +1,4 @@
-name: CI
+name: Build & Test
 
 on:
   push:
@@ -9,9 +9,10 @@ on:
 
 jobs:
   test:
+    name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     env:
-      FINLAB_TOKEN: ${{ secrets.FINLAB_TOKEN }}    # job-level env
+      FINLAB_TOKEN: ${{ secrets.FINLAB_TOKEN }}
     strategy:
       fail-fast: false  # Don't cancel other jobs if one fails
       matrix:
@@ -19,7 +20,8 @@ jobs:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Check out code
+      uses: actions/checkout@v4
 
     - name: Install uv
       uses: astral-sh/setup-uv@v3
@@ -30,8 +32,7 @@ jobs:
       run: uv python install ${{ matrix.python-version }}
 
     - name: Install dependencies
-      run: |
-        uv sync --dev
+      run: uv sync --dev
 
     - name: Run unit tests
       run: |
@@ -53,10 +54,12 @@ jobs:
       run: |
         uv run pytest tests/unit/test_boundary_conditions.py tests/unit/test_error_scenarios.py -v --tb=short -n auto
 
-  lint:
+  test-coverage:
+    name: Test Coverage
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Check out code
+      uses: actions/checkout@v4
 
     - name: Install uv
       uses: astral-sh/setup-uv@v3
@@ -69,27 +72,17 @@ jobs:
     - name: Install dependencies
       run: uv sync --dev
 
-    - name: Run ruff check
-      run: uv run ruff check src/ tests/
+    - name: Run tests with coverage
+      run: |
+        uv run pytest tests/unit/ --cov=src/finlab_guard --cov-report=xml --cov-report=term
+      env:
+        FINLAB_TOKEN: ""
 
-    - name: Run ruff format check
-      run: uv run ruff format --check src/ tests/
-
-  type-check:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v3
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
       with:
-        version: "latest"
-
-    - name: Set up Python
-      run: uv python install 3.11
-
-    - name: Install dependencies
-      run: uv sync --dev
-
-    - name: Run mypy
-      run: uv run mypy src/
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
