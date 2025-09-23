@@ -28,15 +28,15 @@ Two short examples showing the most common flows.
 This project can monkey-patch `finlab.data.get` so reads go through the guarded cache. Example:
 
 ```python
-import finlab
+from finlab import data
 from finlab_guard import FinlabGuard
 
 # Create a FinlabGuard instance and install the monkey-patch
 guard = FinlabGuard()
 guard.install_patch()
 
-# Use finlab.data.get as normal; FinlabGuard will intercept and use cache
-result = finlab.data.get('price:收盤價')
+# Use data.get as normal; FinlabGuard will intercept and use cache
+result = data.get('price:收盤價')
 
 # When done, remove the monkey-patch
 guard.remove_patch()
@@ -47,9 +47,10 @@ guard.remove_patch()
 FinlabGuard supports a time context so you can query data "as-of" a past time.
 
 ```python
-import finlab
+from finlab import data
 from finlab_guard import FinlabGuard
 from datetime import datetime, timedelta
+
 guard = FinlabGuard()
 guard.install_patch()
 
@@ -57,13 +58,39 @@ guard.install_patch()
 query_time = datetime.now() - timedelta(days=7)
 guard.set_time_context(query_time)
 
-# Now call finlab.data.get normally; the guard will return historical data
-result = finlab.data.get('price:收盤價')
+# Now call data.get normally; the guard will return historical data
+result = data.get('price:收盤價')
 
 # Clear the time context and remove the monkey-patch when done
 guard.clear_time_context()
 guard.remove_patch()
 ```
+
+### 3) Parameter precedence for allow_historical_changes
+
+FinlabGuard uses an `effective_allow_changes` logic with parameter precedence:
+
+```python
+from finlab import data
+from finlab_guard import FinlabGuard
+
+# Set global setting via install_patch
+guard = FinlabGuard()
+guard.install_patch(allow_historical_changes=True)  # Global setting
+
+# Method parameter overrides global setting
+result1 = data.get('price:收盤價', allow_historical_changes=False)  # Uses False (method override)
+result2 = data.get('volume:成交量')  # Uses True (global setting)
+
+# Precedence order: method parameter > global setting > default (False)
+```
+
+**Parameter Precedence**:
+1. **Method parameter** (highest priority): `get(dataset, allow_historical_changes=True/False)`
+2. **Global setting**: Set via `install_patch(allow_historical_changes=True/False)`
+3. **Default value** (lowest priority): `False`
+
+This allows fine-grained control where you can set a global policy but override it for specific datasets when needed.
 
 ## Performance
 
