@@ -7,7 +7,8 @@ A lightweight package for managing a local finlab data cache with versioning and
 ![Linux](https://img.shields.io/badge/OS-Linux-FCC624?logo=linux&logoColor=black)
 ![macOS](https://img.shields.io/badge/OS-macOS-000000?logo=apple&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://github.com/iapcal/finlab-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/iapcal/finlab-guard/actions)
+[![Build](https://github.com/iapcal/finlab-guard/actions/workflows/build.yml/badge.svg)](https://github.com/iapcal/finlab-guard/actions/workflows/build.yml)
+[![Lint](https://github.com/iapcal/finlab-guard/actions/workflows/lint.yml/badge.svg)](https://github.com/iapcal/finlab-guard/actions/workflows/lint.yml)
 
 ## Installation
 
