@@ -103,7 +103,7 @@ class TestWorkingIntegration:
 
         # Force download should work
         with self._mock_finlab_data(modified_data):
-            result2 = guard.get("modification_test", force_download=True)
+            result2 = guard.get("modification_test", allow_historical_changes=True)
 
         pd.testing.assert_frame_equal(result2, modified_data)
 

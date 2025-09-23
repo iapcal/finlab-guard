@@ -113,7 +113,7 @@ class TestDtypeSystemIntegration:
         with patch.object(guard, "_now", return_value=phase3_time):
             with self._mock_finlab_data(phase3_data):
                 result3 = guard.get(
-                    key, force_download=True
+                    key, allow_historical_changes=True
                 )  # Force download for new column addition
 
         # Verify phase 3 dtypes
@@ -125,7 +125,7 @@ class TestDtypeSystemIntegration:
         # Query at phase 1 time
         guard.set_time_context(initial_time + timedelta(minutes=10))
         try:
-            historical_1 = guard.get(key, force_download=False)
+            historical_1 = guard.get(key, allow_historical_changes=False)
             assert historical_1["int_col"].dtype == np.dtype("int32")  # Original
             assert historical_1["float_col"].dtype == np.dtype("float32")  # Original
             assert "new_col" not in historical_1.columns  # Doesn't exist yet
@@ -135,7 +135,7 @@ class TestDtypeSystemIntegration:
         # Query at phase 2 time
         guard.set_time_context(phase2_time + timedelta(minutes=10))
         try:
-            historical_2 = guard.get(key, force_download=False)
+            historical_2 = guard.get(key, allow_historical_changes=False)
             assert historical_2["int_col"].dtype == np.dtype("int64")  # Updated
             assert historical_2["float_col"].dtype == np.dtype(
                 "float32"
@@ -205,7 +205,7 @@ class TestDtypeSystemIntegration:
         for query_time, expected_dtype in test_cases:
             guard.set_time_context(query_time)
             try:
-                result = guard.get(key, force_download=False)
+                result = guard.get(key, allow_historical_changes=False)
                 actual_dtype = str(result["col"].dtype)
                 assert actual_dtype == expected_dtype, (
                     f"At {query_time}: expected {expected_dtype}, got {actual_dtype}"
@@ -277,7 +277,7 @@ class TestDtypeSystemIntegration:
         query_time = initial_time + timedelta(minutes=30)
         guard.set_time_context(query_time)
         try:
-            historical_result = guard.get(key, force_download=False)
+            historical_result = guard.get(key, allow_historical_changes=False)
             for col, expected_dtype in expected_dtypes.items():
                 actual_dtype = str(historical_result[col].dtype)
                 assert actual_dtype == expected_dtype, (
@@ -329,7 +329,7 @@ class TestDtypeSystemIntegration:
         query_time = initial_time + timedelta(minutes=30)
         guard.set_time_context(query_time)
         try:
-            historical = guard.get(key, force_download=False)
+            historical = guard.get(key, allow_historical_changes=False)
             assert list(historical.columns) == [
                 "z_col",
                 "a_col",
@@ -380,7 +380,7 @@ class TestDtypeSystemIntegration:
         query_time = initial_time + timedelta(minutes=30)
         guard.set_time_context(query_time)
         try:
-            historical = guard.get(key, force_download=False)
+            historical = guard.get(key, allow_historical_changes=False)
             assert list(historical.index) == [
                 "gamma",
                 "alpha",
@@ -425,7 +425,7 @@ class TestDtypeSystemIntegration:
             query_time = base_time + timedelta(hours=i, minutes=30)
             guard.set_time_context(query_time)
             try:
-                result = guard.get(key, force_download=False)
+                result = guard.get(key, allow_historical_changes=False)
                 actual_dtype = str(result["evolving_col"].dtype)
                 assert actual_dtype == expected_dtype, (
                     f"Step {i}: expected {expected_dtype}, got {actual_dtype}"

@@ -61,6 +61,9 @@ class FinlabGuard:
         # Time context for historical queries
         self.time_context: Optional[datetime] = None
 
+        # Global setting for allowing historical changes
+        self._allow_historical_changes: bool = False
+
         logger.info(f"FinlabGuard initialized with cache_dir: {self.cache_dir}")
 
     def set_time_context(
@@ -115,13 +118,15 @@ class FinlabGuard:
 
         return now
 
-    def get(self, key: str, force_download: bool = False) -> pd.DataFrame:
+    def get(self, dataset: str, save_to_storage: bool = True, force_download: bool = False, allow_historical_changes: Optional[bool] = None) -> pd.DataFrame:
         """
         Get data with caching and change detection.
 
         Args:
-            key: Dataset key (e.g., 'price:收盤價')
-            force_download: Force download even if changes detected
+            dataset: Dataset key (e.g., 'price:收盤價')
+            save_to_storage: Compatibility parameter for original finlab API (bypassed to original)
+            force_download: Force download parameter for original finlab API (bypassed to original)
+            allow_historical_changes: Allow historical data modifications (overrides global setting if specified)
 
         Returns:
             DataFrame with requested data
@@ -130,14 +135,25 @@ class FinlabGuard:
             DataModifiedException: When historical data has been modified
             FinlabConnectionException: When unable to connect to finlab
         """
+        # Use dataset as key for internal consistency
+        key = dataset
+
+        # Determine effective allow_historical_changes setting
+        # Method parameter takes precedence over global setting
+        effective_allow_changes = (
+            allow_historical_changes
+            if allow_historical_changes is not None
+            else self._allow_historical_changes
+        )
+
         # Check if in time context mode (historical query)
         if self.time_context:
             logger.info(f"Loading historical data for {key} as of {self.time_context}")
             return self.cache_manager.load_data(key, self.time_context)
 
-        # Get fresh data from finlab
+        # Get fresh data from finlab (bypass parameters to original API)
         try:
-            new_data = self._fetch_from_finlab(key)
+            new_data = self._fetch_from_finlab(key, save_to_storage, force_download)
         except Exception as e:
             raise FinlabConnectionException(
                 f"Cannot fetch data from finlab: {e}"
@@ -170,7 +186,7 @@ class FinlabGuard:
 
         if modifications:
             # Historical data was modified
-            if force_download:
+            if effective_allow_changes:
                 timestamp = self.generate_unique_timestamp(key)
                 # Use incremental save to only store changes
                 self.cache_manager.save_incremental_changes(
@@ -201,12 +217,14 @@ class FinlabGuard:
                 logger.info(f"No new data to cache for {key}")
             return new_data
 
-    def _fetch_from_finlab(self, key: str) -> pd.DataFrame:
+    def _fetch_from_finlab(self, key: str, save_to_storage: bool = True, force_download: bool = False) -> pd.DataFrame:
         """
         Fetch data from finlab using original function.
 
         Args:
             key: Dataset key
+            save_to_storage: Parameter passed to original finlab API
+            force_download: Parameter passed to original finlab API
 
         Returns:
             DataFrame from finlab
@@ -215,10 +233,11 @@ class FinlabGuard:
             import finlab.data
 
             # If a patched original exists, call that; otherwise call get.
+            # Pass through the original API parameters
             if hasattr(finlab.data, "_original_get"):
-                result = finlab.data._original_get(key)
+                result = finlab.data._original_get(key, save_to_storage=save_to_storage, force_download=force_download)
             else:
-                result = finlab.data.get(key)
+                result = finlab.data.get(key, save_to_storage=save_to_storage, force_download=force_download)
 
             # Ensure we return a DataFrame (finlab API should return one)
             if isinstance(result, pd.DataFrame):
@@ -234,8 +253,13 @@ class FinlabGuard:
         except ImportError as e:
             raise FinlabConnectionException("finlab package not found") from e
 
-    def install_patch(self) -> None:
-        """Install monkey patch for finlab.data.get."""
+    def install_patch(self, allow_historical_changes: bool = False) -> None:
+        """
+        Install monkey patch for finlab.data.get.
+
+        Args:
+            allow_historical_changes: Global setting to allow historical data modifications
+        """
         global _global_guard_instance
 
         try:
@@ -251,11 +275,14 @@ class FinlabGuard:
                 "finlab-guard already installed. Use remove_patch() first."
             )
 
+        # Set global setting for historical changes
+        self._allow_historical_changes = allow_historical_changes
+
         # Save original function and install patch
         finlab.data._original_get = finlab.data.get
         _global_guard_instance = self
 
-        # Install patch
+        # Install patch - forward all arguments to maintain API compatibility
         def patched_get(*args: Any, **kwargs: Any) -> Any:
             return _global_guard_instance.get(*args, **kwargs)
 

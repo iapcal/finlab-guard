@@ -4,10 +4,10 @@ This module tests the 7 critical scenarios identified in TEST_REFACTOR_PLAN.md:
 1. New index, no changes to existing data/dtype
 2. New index with dtype changes
 3. New index + new column
-4. New index + historical changes without force_download
-5. New index + historical changes with force_download
-6. Historical changes only with force_download
-7. Historical changes + new column with force_download
+4. New index + historical changes without allow_historical_changes
+5. New index + historical changes with allow_historical_changes
+6. Historical changes only with allow_historical_changes
+7. Historical changes + new column with allow_historical_changes
 
 Each scenario tests the complete end-to-end workflow including:
 - Initial data setup and storage
@@ -87,7 +87,7 @@ class TestDatasetScenarios:
         """Verify time context query returns correct historical data."""
         guard.set_time_context(target_time)
         try:
-            result = guard.get(key, force_download=False)
+            result = guard.get(key, allow_historical_changes=False)
             self._verify_data_integrity(expected, result)
         finally:
             guard.clear_time_context()
@@ -190,7 +190,7 @@ class TestDatasetScenarios:
         query_time = initial_time + timedelta(minutes=30)
         guard.set_time_context(query_time)
         try:
-            old_result = guard.get(key, force_download=False)
+            old_result = guard.get(key, allow_historical_changes=False)
 
             # Check if we got valid historical data
             if len(old_result) == 0 or "col1" not in old_result.columns:
@@ -265,7 +265,7 @@ class TestDatasetScenarios:
         self, guard, initial_data
     ):
         """
-        Scenario 4: New index + historical changes, no force_download
+        Scenario 4: New index + historical changes, no allow_historical_changes
 
         Setup:
         - Initial: A=100, B=200
@@ -326,10 +326,10 @@ class TestDatasetScenarios:
         self, guard, initial_data
     ):
         """
-        Scenario 5: New index + historical changes with force_download
+        Scenario 5: New index + historical changes with allow_historical_changes
 
         Verify:
-        - get(force_download=True) succeeds
+        - get(allow_historical_changes=True) succeeds
         - returns latest finlab data (including modifications)
         - saves incremental changes (modifications + additions)
         - time_context can access both before/after data
@@ -357,8 +357,8 @@ class TestDatasetScenarios:
 
         with patch.object(guard, "_now", return_value=later_time):
             with self._mock_finlab_data(modified_data):
-                # Verify: get(force_download=True) succeeds
-                result2 = guard.get(key, force_download=True)
+                # Verify: get(allow_historical_changes=True) succeeds
+                result2 = guard.get(key, allow_historical_changes=True)
 
         # Verify: returns latest finlab data (including modifications)
         self._verify_data_integrity(modified_data, result2)
@@ -373,7 +373,7 @@ class TestDatasetScenarios:
 
     def test_scenario_6_historical_changes_only_with_force(self, guard, initial_data):
         """
-        Scenario 6: Only historical changes with force_download
+        Scenario 6: Only historical changes with allow_historical_changes
 
         Setup:
         - Initial: A=100, B=200
@@ -382,7 +382,7 @@ class TestDatasetScenarios:
         - finlab modifies: A=105 (B unchanged)
 
         Verify:
-        - get(force_download=True) succeeds
+        - get(allow_historical_changes=True) succeeds
         - incremental storage contains only modifications
         - time_context queries work correctly for different time points
         """
@@ -407,8 +407,8 @@ class TestDatasetScenarios:
 
         with patch.object(guard, "_now", return_value=later_time):
             with self._mock_finlab_data(modified_data):
-                # Verify: get(force_download=True) succeeds
-                result2 = guard.get(key, force_download=True)
+                # Verify: get(allow_historical_changes=True) succeeds
+                result2 = guard.get(key, allow_historical_changes=True)
 
         # Verify: returns modified data
         self._verify_data_integrity(modified_data, result2)
@@ -425,7 +425,7 @@ class TestDatasetScenarios:
         self, guard, initial_data
     ):
         """
-        Scenario 7: Historical changes + new column with force_download
+        Scenario 7: Historical changes + new column with allow_historical_changes
 
         Action:
         - modify A=105 + add col3
@@ -458,7 +458,7 @@ class TestDatasetScenarios:
         with patch.object(guard, "_now", return_value=later_time):
             with self._mock_finlab_data(mixed_changes_data):
                 # Verify: mixed changes handled correctly
-                result2 = guard.get(key, force_download=True)
+                result2 = guard.get(key, allow_historical_changes=True)
 
         # Verify: returns data with modifications and new structure
         self._verify_data_integrity(mixed_changes_data, result2)

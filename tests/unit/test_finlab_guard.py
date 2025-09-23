@@ -394,3 +394,187 @@ class TestCoveragePhaseTesting:
 
         finally:
             safe_rmtree(temp_dir)
+
+    def test_install_patch_with_allow_historical_changes_true(self):
+        """Test install_patch with allow_historical_changes=True."""
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            config = {"compression": None}
+            guard = FinlabGuard(cache_dir=temp_dir, config=config)
+
+            # Clean up any existing global state
+            import finlab_guard.core.guard as guard_module
+            guard_module._global_guard_instance = None
+
+            # Ensure we start with a clean finlab mock
+            mock_finlab = Mock()
+            mock_finlab.data = Mock()
+            mock_finlab.data.get = Mock()
+
+            with patch.dict(
+                "sys.modules", {"finlab": mock_finlab, "finlab.data": mock_finlab.data}
+            ):
+                # Ensure the mock object doesn't have _original_get attribute initially
+                if hasattr(mock_finlab.data, "_original_get"):
+                    delattr(mock_finlab.data, "_original_get")
+
+                # Install patch with allow_historical_changes=True
+                guard.install_patch(allow_historical_changes=True)
+
+                # Verify the global setting was applied
+                assert guard._allow_historical_changes == True
+
+                # Clean up
+                guard.remove_patch()
+
+            guard.close()
+
+        finally:
+            safe_rmtree(temp_dir)
+
+    def test_install_patch_with_allow_historical_changes_false(self):
+        """Test install_patch with allow_historical_changes=False."""
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            config = {"compression": None}
+            guard = FinlabGuard(cache_dir=temp_dir, config=config)
+
+            # Clean up any existing global state
+            import finlab_guard.core.guard as guard_module
+            guard_module._global_guard_instance = None
+
+            mock_finlab = Mock()
+            mock_finlab.data = Mock()
+            mock_finlab.data.get = Mock()
+
+            with patch.dict(
+                "sys.modules", {"finlab": mock_finlab, "finlab.data": mock_finlab.data}
+            ):
+                # Ensure the mock object doesn't have _original_get attribute initially
+                if hasattr(mock_finlab.data, "_original_get"):
+                    delattr(mock_finlab.data, "_original_get")
+
+                # Install patch with explicit allow_historical_changes=False
+                guard.install_patch(allow_historical_changes=False)
+
+                # Verify the global setting was applied
+                assert guard._allow_historical_changes == False
+
+                # Clean up
+                guard.remove_patch()
+
+            guard.close()
+
+        finally:
+            safe_rmtree(temp_dir)
+
+    def test_install_patch_default_allow_historical_changes(self):
+        """Test install_patch with default allow_historical_changes parameter."""
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            config = {"compression": None}
+            guard = FinlabGuard(cache_dir=temp_dir, config=config)
+
+            # Clean up any existing global state
+            import finlab_guard.core.guard as guard_module
+            guard_module._global_guard_instance = None
+
+            mock_finlab = Mock()
+            mock_finlab.data = Mock()
+            mock_finlab.data.get = Mock()
+
+            with patch.dict(
+                "sys.modules", {"finlab": mock_finlab, "finlab.data": mock_finlab.data}
+            ):
+                # Ensure the mock object doesn't have _original_get attribute initially
+                if hasattr(mock_finlab.data, "_original_get"):
+                    delattr(mock_finlab.data, "_original_get")
+
+                # Install patch without specifying allow_historical_changes (should default to False)
+                guard.install_patch()
+
+                # Verify the global setting defaults to False
+                assert guard._allow_historical_changes == False
+
+                # Clean up
+                guard.remove_patch()
+
+            guard.close()
+
+        finally:
+            safe_rmtree(temp_dir)
+
+    def test_get_with_global_allow_historical_changes_setting(self):
+        """Test get() method respects global allow_historical_changes setting."""
+        # Clean up any existing global state
+        import finlab_guard.core.guard as guard_module
+        guard_module._global_guard_instance = None
+
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            config = {"compression": None}
+            guard = FinlabGuard(cache_dir=temp_dir, config=config)
+
+            # Create initial cache
+            df1 = pd.DataFrame(
+                {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
+            )
+            with patch.object(guard, "_fetch_from_finlab", return_value=df1):
+                guard.get("test_key")
+
+            # Set global allow_historical_changes=True
+            guard._allow_historical_changes = True
+
+            # Simulate modified data
+            df2 = pd.DataFrame(
+                {"A": [99, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
+            )
+            with patch.object(guard, "_fetch_from_finlab", return_value=df2):
+                # Should not raise exception due to global setting
+                result = guard.get("test_key")
+                pd.testing.assert_frame_equal(result, df2)
+
+            guard.close()
+
+        finally:
+            safe_rmtree(temp_dir)
+
+    def test_get_method_parameter_overrides_global_setting(self):
+        """Test get() method parameter overrides global allow_historical_changes setting."""
+        # Clean up any existing global state
+        import finlab_guard.core.guard as guard_module
+        guard_module._global_guard_instance = None
+
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            config = {"compression": None}
+            guard = FinlabGuard(cache_dir=temp_dir, config=config)
+
+            # Create initial cache
+            df1 = pd.DataFrame(
+                {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
+            )
+            with patch.object(guard, "_fetch_from_finlab", return_value=df1):
+                guard.get("test_key")
+
+            # Set global allow_historical_changes=True
+            guard._allow_historical_changes = True
+
+            # Simulate modified data
+            df2 = pd.DataFrame(
+                {"A": [99, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
+            )
+            with patch.object(guard, "_fetch_from_finlab", return_value=df2):
+                # Method parameter allow_historical_changes=False should override global True
+                with pytest.raises(DataModifiedException, match="Historical data modified"):
+                    guard.get("test_key", allow_historical_changes=False)
+
+            guard.close()
+
+        finally:
+            safe_rmtree(temp_dir)

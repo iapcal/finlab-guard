@@ -104,8 +104,8 @@ class TestTimeContextIntegration:
         query_time_1 = t1 + timedelta(minutes=30)
         guard.set_time_context(query_time_1)
         try:
-            historical_price = guard.get("price_data", force_download=False)
-            historical_volume = guard.get("volume_data", force_download=False)
+            historical_price = guard.get("price_data", allow_historical_changes=False)
+            historical_volume = guard.get("volume_data", allow_historical_changes=False)
 
             # Should get v1 data for both
             assert len(historical_price) == 2  # Original length
@@ -120,8 +120,8 @@ class TestTimeContextIntegration:
         query_time_2 = t2 + timedelta(minutes=30)
         guard.set_time_context(query_time_2)
         try:
-            historical_price = guard.get("price_data", force_download=False)
-            historical_volume = guard.get("volume_data", force_download=False)
+            historical_price = guard.get("price_data", allow_historical_changes=False)
+            historical_volume = guard.get("volume_data", allow_historical_changes=False)
 
             # Should get v2 data for both
             assert len(historical_price) == 3  # Updated length
@@ -138,9 +138,9 @@ class TestTimeContextIntegration:
         # Test that clearing time context works for all datasets
         # When no time context, guard.get() should return latest data
         with self._mock_finlab_data(price_v2):  # Provide mock in case fetch is needed
-            latest_price = guard.get("price_data", force_download=False)
+            latest_price = guard.get("price_data", allow_historical_changes=False)
         with self._mock_finlab_data(volume_v2):  # Provide mock for volume data too
-            latest_volume = guard.get("volume_data", force_download=False)
+            latest_volume = guard.get("volume_data", allow_historical_changes=False)
 
         # Should get latest (v2) data
         assert len(latest_price) == 3  # Latest length
@@ -203,7 +203,7 @@ class TestTimeContextIntegration:
                 with self._mock_finlab_data(phase_data):
                     if phase_time == base_time + timedelta(hours=4):
                         # Phase 3 has modifications, force download
-                        guard.get(key, force_download=True)
+                        guard.get(key, allow_historical_changes=True)
                     else:
                         guard.get(key)
 
@@ -226,7 +226,7 @@ class TestTimeContextIntegration:
         for query_time, expected_data, description in test_scenarios:
             guard.set_time_context(query_time)
             try:
-                result = guard.get(key, force_download=False)
+                result = guard.get(key, allow_historical_changes=False)
 
                 # Verify structure matches expected
                 assert len(result) == len(expected_data), (
@@ -306,7 +306,7 @@ class TestTimeContextIntegration:
         for query_time, expected_data, description in boundary_tests:
             guard.set_time_context(query_time)
             try:
-                result = guard.get(key, force_download=False)
+                result = guard.get(key, allow_historical_changes=False)
 
                 # Check if we got empty DataFrame (for queries before any data)
                 if result.empty:
@@ -382,7 +382,7 @@ class TestTimeContextIntegration:
             with patch.object(guard, "_now", return_value=phase_time):
                 with self._mock_finlab_data(phase_data):
                     if i == 2:  # Phase 3 has new column, force download
-                        guard.get(key, force_download=True)
+                        guard.get(key, allow_historical_changes=True)
                     else:
                         guard.get(key)
 
@@ -401,7 +401,7 @@ class TestTimeContextIntegration:
         ) in dtype_tests:
             guard.set_time_context(query_time)
             try:
-                result = guard.get(key, force_download=False)
+                result = guard.get(key, allow_historical_changes=False)
 
                 # Check dtypes
                 assert str(result["num_col"].dtype) == expected_num_dtype
@@ -447,32 +447,32 @@ class TestTimeContextIntegration:
         # Test clearing behavior
         # 1. Normal state (no time context)
         with self._mock_finlab_data(new_data):  # Provide mock for guard.get()
-            result = guard.get(key, force_download=False)
+            result = guard.get(key, allow_historical_changes=False)
         assert len(result) == 2  # Latest data has both A and B
         assert result.loc["A", "value"] == 100  # A value stays same
 
         # 2. Set time context
         query_time = old_time + timedelta(minutes=30)
         guard.set_time_context(query_time)
-        result = guard.get(key, force_download=False)
+        result = guard.get(key, allow_historical_changes=False)
         assert len(result) == 1  # Historical data has only A
         assert result.loc["A", "value"] == 100  # Historical data
 
         # 3. Clear time context
         guard.clear_time_context()
         with self._mock_finlab_data(new_data):  # Provide mock for guard.get()
-            result = guard.get(key, force_download=False)
+            result = guard.get(key, allow_historical_changes=False)
         assert len(result) == 2  # Back to latest (both A and B)
 
         # 4. Multiple set/clear cycles
         for _ in range(3):
             guard.set_time_context(query_time)
-            result = guard.get(key, force_download=False)
+            result = guard.get(key, allow_historical_changes=False)
             assert len(result) == 1  # Historical (only A)
 
             guard.clear_time_context()
             with self._mock_finlab_data(new_data):  # Provide mock for guard.get()
-                result = guard.get(key, force_download=False)
+                result = guard.get(key, allow_historical_changes=False)
             assert len(result) == 2  # Latest (both A and B)
 
         # 5. Verify time context state
@@ -496,7 +496,7 @@ class TestTimeContextIntegration:
         query_time = save_time - timedelta(hours=2)
         guard.set_time_context(query_time)
         try:
-            result = guard.get(key, force_download=False)
+            result = guard.get(key, allow_historical_changes=False)
             # Should still get some data (earliest available)
             assert len(result) >= 0  # May be empty or return earliest data
         finally:
@@ -520,7 +520,7 @@ class TestTimeContextIntegration:
         time_string = (save_time + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
         guard.set_time_context(time_string)
         try:
-            result = guard.get(key, force_download=False)
+            result = guard.get(key, allow_historical_changes=False)
             assert len(result) == 1
         finally:
             guard.clear_time_context()

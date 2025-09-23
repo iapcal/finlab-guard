@@ -373,7 +373,7 @@ class TestMonkeyPatchIntegration:
 
         call_count = 0
 
-        def mock_get(key, force_download=False):
+        def mock_get(key, save_to_storage=True, force_download=False):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -404,7 +404,7 @@ class TestMonkeyPatchIntegration:
             guard.remove_patch()
 
             # Force download should work
-            result3 = mock_finlab.data.get("test_key", force_download=True)
+            result3 = mock_finlab.data.get("test_key", allow_historical_changes=True)
             pd.testing.assert_frame_equal(result3, modified_data)
 
 

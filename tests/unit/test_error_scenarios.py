@@ -107,8 +107,8 @@ class TestFinlabGuardErrorScenarios:
             ):
                 self.guard.get("test_key")
 
-    def test_get_with_data_modification_no_force(self):
-        """Test get() when data is modified and force_download=False."""
+    def test_get_with_data_modification_no_allow_changes(self):
+        """Test get() when data is modified and allow_historical_changes=False."""
         # Create initial cache
         df1 = pd.DataFrame(
             {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
@@ -122,10 +122,10 @@ class TestFinlabGuardErrorScenarios:
         )
         with patch.object(self.guard, "_fetch_from_finlab", return_value=df2):
             with pytest.raises(DataModifiedException, match="Historical data modified"):
-                self.guard.get("test_key", force_download=False)
+                self.guard.get("test_key", allow_historical_changes=False)
 
-    def test_get_with_data_modification_force_download(self):
-        """Test get() when data is modified and force_download=True."""
+    def test_get_with_data_modification_allow_changes(self):
+        """Test get() when data is modified and allow_historical_changes=True."""
         # Create initial cache
         df1 = pd.DataFrame(
             {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
@@ -133,12 +133,12 @@ class TestFinlabGuardErrorScenarios:
         with patch.object(self.guard, "_fetch_from_finlab", return_value=df1):
             self.guard.get("test_key")
 
-        # Simulate modified data with force download
+        # Simulate modified data with allow changes
         df2 = pd.DataFrame(
             {"A": [99, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
         )
         with patch.object(self.guard, "_fetch_from_finlab", return_value=df2):
-            result = self.guard.get("test_key", force_download=True)
+            result = self.guard.get("test_key", allow_historical_changes=True)
             pd.testing.assert_frame_equal(result, df2)
 
     def test_install_patch_when_already_installed(self):
