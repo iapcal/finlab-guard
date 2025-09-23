@@ -585,3 +585,83 @@ class TestCoveragePhaseTesting:
 
         finally:
             safe_rmtree(temp_dir)
+
+    def test_force_hash_bypass_configuration(self):
+        """Test force_hash_bypass configuration option."""
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            # Create guard with force_hash_bypass enabled
+            config = {"compression": None, "force_hash_bypass": True}
+            guard = FinlabGuard(cache_dir=temp_dir, config=config)
+
+            # Create initial cache
+            df1 = pd.DataFrame(
+                {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
+            )
+            with patch.object(guard, "_fetch_from_finlab", return_value=df1):
+                guard.get("test_key")
+
+            # Same data - with force_hash_bypass, should still do full reconstruction
+            df1_same = pd.DataFrame(
+                {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
+            )
+
+            # Mock the validator to verify it's called even for identical data
+            with patch.object(guard, "_fetch_from_finlab", return_value=df1_same):
+                with patch.object(
+                    guard.validator, "detect_changes_detailed"
+                ) as mock_detect:
+                    mock_detect.return_value = ([], [])  # No changes
+
+                    # Should still call detect_changes_detailed due to force_hash_bypass
+                    result = guard.get("test_key")
+
+                    # Verify detect_changes_detailed was called (bypassed hash optimization)
+                    mock_detect.assert_called_once()
+                    pd.testing.assert_frame_equal(result, df1_same)
+
+            guard.close()
+
+        finally:
+            safe_rmtree(temp_dir)
+
+    def test_force_hash_bypass_disabled_by_default(self):
+        """Test that force_hash_bypass is disabled by default (normal hash optimization works)."""
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            # Create guard with default config (force_hash_bypass should be False)
+            config = {"compression": None}
+            guard = FinlabGuard(cache_dir=temp_dir, config=config)
+
+            # Verify force_hash_bypass is False by default
+            assert guard.config.get("force_hash_bypass", False) is False
+
+            # Create initial cache
+            df1 = pd.DataFrame(
+                {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
+            )
+            with patch.object(guard, "_fetch_from_finlab", return_value=df1):
+                guard.get("test_key")
+
+            # Same data - should use hash optimization and NOT call detect_changes_detailed
+            df1_same = pd.DataFrame(
+                {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
+            )
+
+            with patch.object(guard, "_fetch_from_finlab", return_value=df1_same):
+                with patch.object(
+                    guard.validator, "detect_changes_detailed"
+                ) as mock_detect:
+                    # Should use hash optimization and return early without calling detect_changes_detailed
+                    result = guard.get("test_key")
+
+                    # Verify detect_changes_detailed was NOT called (hash optimization worked)
+                    mock_detect.assert_not_called()
+                    pd.testing.assert_frame_equal(result, df1_same)
+
+            guard.close()
+
+        finally:
+            safe_rmtree(temp_dir)

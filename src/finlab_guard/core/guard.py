@@ -45,6 +45,7 @@ class FinlabGuard:
             "compression": "snappy",
             "progress_bar": True,
             "log_level": "INFO",
+            "force_hash_bypass": False,  # Force ignore hash optimization, always reconstruct for comparison
         }
         if config:
             self.config.update(config)
@@ -177,13 +178,23 @@ class FinlabGuard:
             return new_data
 
         # **Hash optimization: Quick comparison before detailed diff**
-        new_hash = self.cache_manager._compute_dataframe_hash(new_data)
-        cached_hash = self.cache_manager._get_data_hash(key)
+        # Skip hash optimization if force_hash_bypass is enabled
+        if not self.config.get("force_hash_bypass", False):
+            new_hash = self.cache_manager._compute_dataframe_hash(new_data)
+            cached_hash = self.cache_manager._get_data_hash(key)
 
-        if cached_hash and new_hash == cached_hash:
-            # Hash match → data unchanged → return new data directly
-            logger.info(f"Data unchanged for {key} (hash match), returning new data")
-            return new_data
+            if cached_hash and new_hash == cached_hash:
+                # Hash match → data unchanged → return new data directly
+                logger.info(
+                    f"Data unchanged for {key} (hash match), returning new data"
+                )
+                return new_data
+        else:
+            logger.debug(
+                f"Hash optimization bypassed for {key} (force_hash_bypass enabled)"
+            )
+            # Still compute hash for storage, but don't use it for comparison
+            new_hash = self.cache_manager._compute_dataframe_hash(new_data)
 
         # Detect changes
         modifications, additions = self.validator.detect_changes_detailed(

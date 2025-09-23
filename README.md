@@ -1,5 +1,7 @@
 # finlab-guard
 
+**This is an unofficial, third-party implementation**
+
 A lightweight package for managing a local finlab data cache with versioning and time-context features.
 
 ![Python versions](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue)
@@ -67,17 +69,20 @@ guard.remove_patch()
 
 finlab-guard delivers significant performance improvements through its DuckDB + Polars architecture:
 
-🚀 **Cache Hit Performance**: 30.6% faster than previous pandas-based implementation
+🚀 **Cache Performance**: Up to **96% faster** with hash optimization
 
-| Version | Cache Hit Time | Improvement |
-|---------|---------------|-------------|
-| v0.1.0 (pandas.stack) | 17.9 seconds | baseline |
-| v0.2.0 (DuckDB+Polars) | 12.4 seconds | **-30.6%** ⚡ |
+| Version | Reconstruction Time | Hash Match Time | Improvement |
+|---------|-------------------|-----------------|-------------|
+| v0.1.0 (pandas.stack) | 17.9s | N/A | baseline |
+| v0.2.0 (DuckDB+Polars) | 12.4s | N/A | **-30.6%** ⚡ |
+| v0.3.0 (Hash + orjson) | 11.2s | **0.74s** | **-37.5% / -96%** 🚀 |
 
 *Benchmark: `etl:adj_close` cache retrieval (4,533 × 2,645 DataFrame) - average of 10 runs*
 
 ### Key Optimizations
 
+- **DataFrame hash optimization** (v0.3.0): Fast data comparison using SHA256 hashes to avoid expensive reconstruction when data is unchanged
+- **orjson acceleration** (v0.3.0): Faster JSON parsing with vectorized operations and reduced memory overhead for reconstruction scenarios
 - **Eliminated pandas.stack() bottleneck**: Replaced with vectorized Polars operations
 - **Cell-level change tracking**: Only stores actual differences, not full datasets
 - **DuckDB storage engine**: High-performance indexed storage with time-based reconstruction
@@ -87,6 +92,10 @@ These improvements make finlab-guard ideal for:
 - Large datasets with frequent updates
 - Historical data analysis and backtesting
 - Production environments requiring consistent performance
+
+## Disclaimer
+
+This project is not affiliated with, endorsed by, or officially supported by finlab. It is an independent implementation designed to work alongside the finlab package for enhanced data caching and version control.
 
 ## License
 
