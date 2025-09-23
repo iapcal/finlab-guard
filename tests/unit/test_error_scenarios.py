@@ -149,9 +149,7 @@ class TestFinlabGuardErrorScenarios:
         with patch.dict(
             "sys.modules", {"finlab": mock_finlab, "finlab.data": mock_finlab.data}
         ):
-            with pytest.raises(
-                RuntimeError, match="finlab-guard patch already installed"
-            ):
+            with pytest.raises(RuntimeError, match="finlab-guard already installed"):
                 self.guard.install_patch()
 
     def test_install_patch_when_finlab_not_available(self):

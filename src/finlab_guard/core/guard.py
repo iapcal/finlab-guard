@@ -229,12 +229,6 @@ class FinlabGuard:
         """Install monkey patch for finlab.data.get."""
         global _global_guard_instance
 
-        # Prevent multiple installations
-        if _global_guard_instance is not None:
-            raise RuntimeError(
-                "finlab-guard already installed. Use remove_patch() first."
-            )
-
         try:
             import finlab.data
         except ImportError as e:
@@ -242,22 +236,26 @@ class FinlabGuard:
                 "finlab package not found. Please install finlab first."
             ) from e
 
-        # Save original function
-        if not hasattr(finlab.data, "_original_get"):
-            finlab.data._original_get = finlab.data.get
-            _global_guard_instance = self
+        # Check if patch is already installed
+        if _global_guard_instance is not None or hasattr(finlab.data, "_original_get"):
+            raise RuntimeError(
+                "finlab-guard already installed. Use remove_patch() first."
+            )
 
-            # Install patch
-            def patched_get(*args: Any, **kwargs: Any) -> Any:
-                return _global_guard_instance.get(*args, **kwargs)
+        # Save original function and install patch
+        finlab.data._original_get = finlab.data.get
+        _global_guard_instance = self
 
-            finlab.data.get = patched_get
-            logger.info("Monkey patch installed successfully")
-        else:
-            raise RuntimeError("finlab-guard patch already installed")
+        # Install patch
+        def patched_get(*args: Any, **kwargs: Any) -> Any:
+            return _global_guard_instance.get(*args, **kwargs)
 
-    def remove_patch(self) -> None:
-        """Remove monkey patch for finlab.data.get."""
+        finlab.data.get = patched_get
+        logger.info("Monkey patch installed successfully")
+
+    @classmethod
+    def remove_patch(cls) -> None:
+        """Class method to remove monkey patch for finlab.data.get."""
         global _global_guard_instance
 
         # First check if finlab.data is already imported
@@ -278,6 +276,7 @@ class FinlabGuard:
                 logger.info("Monkey patch removed successfully")
             else:
                 logger.warning("No monkey patch found to remove")
+                _global_guard_instance = None
         except ImportError:
             logger.warning("finlab package not found")
         except Exception as e:

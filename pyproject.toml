@@ -48,7 +48,19 @@ dev = [
     "mypy>=1.18.1",
     "pandas-stubs>=2.2.2.240807",
     "pytest>=8.4.2",
+    "pytest-cov>=5.0.0",
     "pytest-xdist>=3.6.0",
     "ruff>=0.13.0",
     "twine>=6.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--tb=short --strict-markers"
+markers = [
+    "real_finlab: marks tests that require real finlab connection",
+    "serial: marks tests that should run serially to avoid state conflicts",
 ]

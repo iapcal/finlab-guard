@@ -300,3 +300,97 @@ class TestFinlabGuard:
 
         pd.testing.assert_frame_equal(result, large_data)
         assert guard.cache_manager.exists(key)
+
+
+@pytest.mark.serial
+class TestCoveragePhaseTesting:
+    """Phase-based testing to improve coverage systematically."""
+
+    def test_install_convenience_function(self):
+        """Test the install() convenience function from __init__.py."""
+        from finlab_guard import FinlabGuard as ImportedFinlabGuard
+        from finlab_guard import install
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            # Test with default parameters
+            config = {"compression": None}
+            guard = install(cache_dir=temp_dir, config=config)
+
+            # Verify guard instance was created
+            assert isinstance(guard, ImportedFinlabGuard)
+            assert str(guard.cache_dir) == temp_dir
+
+            # Verify patch was automatically installed
+            # We can't easily test real patch installation in unit tests,
+            # but we can verify the function was called by checking global state
+            import finlab_guard.core.guard as guard_module
+
+            assert guard_module._global_guard_instance is not None
+
+            # Clean up
+            guard.remove_patch()
+            guard.close()
+
+        finally:
+            safe_rmtree(temp_dir)
+
+    def test_context_manager_usage(self):
+        """Test FinlabGuard as context manager (__enter__, __exit__)."""
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            config = {"compression": None}
+
+            # Test context manager usage
+            with FinlabGuard(cache_dir=temp_dir, config=config) as guard:
+                # Verify __enter__ returns self
+                assert isinstance(guard, FinlabGuard)
+
+                # Test some basic functionality inside context
+                test_data = pd.DataFrame({"col1": [1, 2], "col2": [1.1, 2.2]})
+                guard.cache_manager.save_data("test_key", test_data, datetime.now())
+                assert guard.cache_manager.exists("test_key")
+
+            # After __exit__, connections should be closed
+            # We can verify this by checking that further operations would fail
+            # or by ensuring cache_manager connections are properly cleaned up
+
+        finally:
+            safe_rmtree(temp_dir)
+
+    def test_timestamp_uniqueness_edge_case(self):
+        """Test timestamp uniqueness when now <= latest_time."""
+        temp_dir = tempfile.mkdtemp()
+
+        try:
+            config = {"compression": None}
+            guard = FinlabGuard(cache_dir=temp_dir, config=config)
+
+            # Create test data with a future timestamp
+            test_data = pd.DataFrame({"col1": [1, 2], "col2": [1.1, 2.2]})
+            future_time = datetime.now() + timedelta(seconds=10)
+
+            # Save data with future timestamp
+            guard.cache_manager.save_data("test_key", test_data, future_time)
+
+            # Mock datetime.now() to return a time before the saved timestamp
+            with patch("finlab_guard.core.guard.datetime") as mock_datetime:
+                mock_now = future_time - timedelta(
+                    seconds=5
+                )  # 5 seconds before saved time
+                mock_datetime.now.return_value = mock_now
+                mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+                # This should trigger the timestamp uniqueness logic (line 114)
+                # where now <= latest_time, so it adds 1 second
+                adjusted_time = guard.generate_unique_timestamp("test_key")
+
+                # The adjusted time should be latest_time + 1 second
+                expected_time = future_time + pd.Timedelta(seconds=1)
+                assert adjusted_time >= expected_time
+
+            guard.close()
+
+        finally:
+            safe_rmtree(temp_dir)

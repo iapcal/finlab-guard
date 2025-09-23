@@ -24,6 +24,7 @@ from finlab_guard import FinlabGuard
 from finlab_guard.utils.exceptions import DataModifiedException
 
 
+@pytest.mark.serial
 class TestMonkeyPatchIntegration:
     """Test complete monkey patch integration."""
 
@@ -407,6 +408,7 @@ class TestMonkeyPatchIntegration:
             pd.testing.assert_frame_equal(result3, modified_data)
 
 
+@pytest.mark.serial
 class TestPatchStatePersistence:
     """Test patch state persistence and recovery."""
 

@@ -9,6 +9,7 @@ A lightweight package for managing a local finlab data cache with versioning and
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Build](https://github.com/iapcal/finlab-guard/actions/workflows/build.yml/badge.svg)](https://github.com/iapcal/finlab-guard/actions/workflows/build.yml)
 [![Lint](https://github.com/iapcal/finlab-guard/actions/workflows/lint.yml/badge.svg)](https://github.com/iapcal/finlab-guard/actions/workflows/lint.yml)
+[![codecov](https://codecov.io/gh/iapcal/finlab-guard/branch/main/graph/badge.svg)](https://codecov.io/gh/iapcal/finlab-guard)
 
 ## Installation
 
