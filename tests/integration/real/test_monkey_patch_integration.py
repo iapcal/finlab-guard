@@ -282,7 +282,12 @@ class TestMonkeyPatchIntegration:
             ),
         }
 
-        def mock_get(key):
+        def mock_get(
+            key,
+            save_to_storage=True,
+            force_download=False,
+            allow_historical_changes=None,
+        ):
             return datasets.get(key, pd.DataFrame())
 
         mock_data_module.get = mock_get
@@ -373,7 +378,12 @@ class TestMonkeyPatchIntegration:
 
         call_count = 0
 
-        def mock_get(key, save_to_storage=True, force_download=False):
+        def mock_get(
+            key,
+            save_to_storage=True,
+            force_download=False,
+            allow_historical_changes=None,
+        ):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
