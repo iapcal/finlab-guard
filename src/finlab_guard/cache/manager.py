@@ -18,11 +18,8 @@ logger = logging.getLogger(__name__)
 def _to_json_str(obj: Any) -> str:
     """Convert object to JSON string with NaN handling."""
 
-    def _default(o: Any) -> Optional[str]:
-        try:
-            return str(o)
-        except Exception:
-            return None
+    def _default(o: Any) -> str:
+        return str(o)
 
     return json.dumps(obj, default=_default, ensure_ascii=False)
 
@@ -139,7 +136,7 @@ class CacheManager:
                 "CREATE INDEX IF NOT EXISTS idx_rows_base_lookup ON rows_base(table_id, snapshot_time, row_key);"
             )
         except Exception:
-            pass  # Indexes might already exist
+            pass  # Indexes might already exist or database doesn't support them
 
     def _get_cache_path(self, key: str) -> Path:
         """Legacy method for compatibility - returns DuckDB path."""
@@ -761,13 +758,7 @@ class CacheManager:
                 return x
 
             changes_pd["value"] = changes_pd["value"].apply(parse_json_value)
-            changes_pl_result = pl.from_pandas(changes_pd)
-            # Ensure we have a DataFrame, not a Series
-            if isinstance(changes_pl_result, pl.DataFrame):
-                changes_pl = changes_pl_result
-            else:
-                # Convert Series to DataFrame if needed
-                changes_pl = pl.DataFrame({"value": changes_pl_result})
+            changes_pl = pl.from_pandas(changes_pd)
 
             # Simplified pivot with single try
             try:

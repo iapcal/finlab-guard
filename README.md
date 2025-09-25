@@ -21,7 +21,7 @@ pip install finlab-guard
 
 ## Usage examples
 
-Two short examples showing the most common flows.
+Three short examples showing the most common flows.
 
 ### 1) Monkey-patch finlab.data.get (installing FinlabGuard)
 
