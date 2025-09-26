@@ -659,13 +659,18 @@ class CacheManager:
 
     def reconstruct_as_of(self, table_id: str, target_time: datetime) -> pd.DataFrame:
         """
-        Faster reconstruct using DuckDB -> Arrow -> Polars pivot + Polars joins.
-        Replaces Python-level dict assembly and pd.DataFrame.from_dict().
+        Reconstruct DataFrame as of specific time by combining data layers.
 
         Returns pandas.DataFrame (index = row_key strings).
         """
+        base_data = self._load_base_snapshot(table_id, target_time)
+        cell_changes = self._load_and_process_cell_changes(table_id, target_time)
+        row_additions = self._load_and_process_row_additions(table_id, target_time)
+        merged_data = self._merge_data_layers(base_data, cell_changes, row_additions)
+        return self._finalize_dataframe(merged_data)
 
-        # 1) load latest snapshot row_data (JSON) for the table (as pandas)
+    def _load_base_snapshot(self, table_id: str, target_time: datetime) -> pl.DataFrame:
+        """Load latest snapshot row_data for the table as Polars DataFrame."""
         q_snap = f"""
         SELECT row_key, row_data FROM rows_base
         WHERE table_id = '{table_id}' AND snapshot_time = (
@@ -694,7 +699,10 @@ class CacheManager:
         else:
             base_pl = pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
 
-        # 2) fetch latest cell_changes per (row_key, col_key) up to target_time
+        return base_pl
+
+    def _load_and_process_cell_changes(self, table_id: str, target_time: datetime) -> pl.DataFrame:
+        """Load and process cell changes into pivoted Polars DataFrame."""
         q_changes_latest = f"""
         SELECT row_key, col_key, value FROM (
             SELECT row_key, col_key, value,
@@ -724,41 +732,21 @@ class CacheManager:
 
         # Process cell changes and pivot
         if not changes_pl.is_empty():
-            # Parse JSON values in pandas (more flexible for mixed types)
-            changes_pd = changes_pl.to_pandas()
+            # Parse JSON values directly in Polars using map_elements
+            # Keep the original _parse_json_value logic but ensure string output for Polars
+            def parse_and_stringify(value):
+                """Parse JSON and ensure string output for Polars compatibility."""
+                parsed = self._parse_json_value(value)
+                return str(parsed) if parsed is not None else ""
 
-            def parse_json_value(x: Any) -> Any:
-                if x is None:
-                    return None
-                if isinstance(x, (int, float, bool)):
-                    return x
-                if isinstance(x, str):
-                    # Try JSON parsing with smart number conversion
-                    try:
-                        parsed = orjson.loads(x) if x else None
-                        if (
-                            isinstance(parsed, str)
-                            and parsed.replace(".", "").replace("-", "").isdigit()
-                        ):
-                            return float(parsed) if "." in parsed else int(parsed)
-                        return parsed
-                    except Exception:
-                        try:
-                            parsed = json.loads(x) if x else None
-                            if (
-                                isinstance(parsed, str)
-                                and parsed.replace(".", "").replace("-", "").isdigit()
-                            ):
-                                return float(parsed) if "." in parsed else int(parsed)
-                            return parsed
-                        except Exception:
-                            if x.replace(".", "").replace("-", "").isdigit():
-                                return float(x) if "." in x else int(x)
-                            return x
-                return x
-
-            changes_pd["value"] = changes_pd["value"].apply(parse_json_value)
-            changes_pl = pl.from_pandas(changes_pd)
+            changes_pl = changes_pl.with_columns([
+                pl.col("row_key").cast(pl.Utf8),
+                pl.col("col_key").cast(pl.Utf8),
+                pl.col("value").map_elements(
+                    parse_and_stringify,
+                    return_dtype=pl.Utf8
+                ).alias("value")
+            ])
 
             # Simplified pivot with single try
             try:
@@ -788,7 +776,41 @@ class CacheManager:
         else:
             pivot_pl = pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
 
-        # 3) fetch row_additions up to target_time and normalize
+        return pivot_pl
+
+    def _parse_json_value(self, x: Any) -> Any:
+        """Parse JSON value with smart type conversion."""
+        if x is None:
+            return None
+        if isinstance(x, (int, float, bool)):
+            return x
+        if isinstance(x, str):
+            # Try JSON parsing with smart number conversion
+            try:
+                parsed = orjson.loads(x) if x else None
+                if (
+                    isinstance(parsed, str)
+                    and parsed.replace(".", "").replace("-", "").isdigit()
+                ):
+                    return float(parsed) if "." in parsed else int(parsed)
+                return parsed
+            except Exception:
+                try:
+                    parsed = json.loads(x) if x else None
+                    if (
+                        isinstance(parsed, str)
+                        and parsed.replace(".", "").replace("-", "").isdigit()
+                    ):
+                        return float(parsed) if "." in parsed else int(parsed)
+                    return parsed
+                except Exception:
+                    if x.replace(".", "").replace("-", "").isdigit():
+                        return float(x) if "." in x else int(x)
+                    return x
+        return x
+
+    def _load_and_process_row_additions(self, table_id: str, target_time: datetime) -> pl.DataFrame:
+        """Load and process row additions into wide Polars DataFrame."""
         q_add = f"""
         SELECT row_key, row_data FROM row_additions
         WHERE table_id = '{table_id}' AND save_time <= TIMESTAMP '{target_time.isoformat()}'
@@ -813,9 +835,14 @@ class CacheManager:
         else:
             adds_pl = pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
 
-        # 4) Merge layers: base_pl (snapshot) <- pivot_pl (cell_changes) <- adds_pl (row_additions)
+        return adds_pl
+
+    def _merge_data_layers(
+        self, base: pl.DataFrame, changes: pl.DataFrame, additions: pl.DataFrame
+    ) -> pl.DataFrame:
+        """Merge three data layers: base snapshot <- cell changes <- row additions."""
         # All DataFrames already have row_key as Utf8, so join directly
-        merged = base_pl.join(pivot_pl, on="row_key", how="full")
+        merged = base.join(changes, on="row_key", how="full")
 
         # Handle row_key from joins
         if "row_key_right" in merged.columns:
@@ -840,9 +867,9 @@ class CacheManager:
             if remaining_deltas:
                 merged = merged.drop(remaining_deltas)
 
-        # Apply adds_pl: join and coalesce (adds have higher precedence)
-        if not adds_pl.is_empty():
-            merged = merged.join(adds_pl, on="row_key", how="full", suffix="_add")
+        # Apply additions: join and coalesce (additions have higher precedence)
+        if not additions.is_empty():
+            merged = merged.join(additions, on="row_key", how="full", suffix="_add")
 
             # Handle row_key from add join
             if "row_key_add" in merged.columns:
@@ -853,7 +880,7 @@ class CacheManager:
                 ).drop("row_key_add")
 
             # Apply add columns
-            add_cols = [c for c in adds_pl.columns if c != "row_key"]
+            add_cols = [c for c in additions.columns if c != "row_key"]
             for c in add_cols:
                 add_col = f"{c}_add"
                 if add_col in merged.columns:
@@ -869,7 +896,10 @@ class CacheManager:
             if remaining_adds:
                 merged = merged.drop(remaining_adds)
 
-        # 5) Convert to pandas and finalize
+        return merged
+
+    def _finalize_dataframe(self, merged: pl.DataFrame) -> pd.DataFrame:
+        """Convert to pandas and apply final formatting."""
         if merged.is_empty():
             return pd.DataFrame()
 
