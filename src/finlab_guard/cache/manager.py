@@ -30,6 +30,9 @@ class ChangeResult:
 
     cell_changes: pd.DataFrame  # columns: row_key, col_key, value, save_time
     row_additions: pd.DataFrame  # columns: row_key, row_data, save_time
+    row_deletions: pd.DataFrame  # columns: row_key, delete_time
+    column_additions: pd.DataFrame  # columns: col_key, col_data_json, add_time
+    column_deletions: pd.DataFrame  # columns: col_key, delete_time
     meta: dict[str, Any]
 
 
@@ -123,6 +126,34 @@ class CacheManager:
             );
             """
         )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS row_deletions (
+                table_id VARCHAR,
+                row_key VARCHAR,
+                delete_time TIMESTAMP
+            );
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS column_deletions (
+                table_id VARCHAR,
+                col_key VARCHAR,
+                delete_time TIMESTAMP
+            );
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS column_additions (
+                table_id VARCHAR,
+                col_key VARCHAR,
+                col_data_json VARCHAR,
+                add_time TIMESTAMP
+            );
+            """
+        )
 
         # Create indexes for performance
         try:
@@ -134,6 +165,15 @@ class CacheManager:
             )
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rows_base_lookup ON rows_base(table_id, snapshot_time, row_key);"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_row_deletions_lookup ON row_deletions(table_id, delete_time, row_key);"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_column_deletions_lookup ON column_deletions(table_id, delete_time, col_key);"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_column_additions_lookup ON column_additions(table_id, add_time, col_key);"
             )
         except Exception:
             pass  # Indexes might already exist or database doesn't support them
@@ -165,9 +205,7 @@ class CacheManager:
         current_signature = {
             "dtypes": {str(col): str(df[col].dtype) for col in df.columns},
             "index_dtype": str(df.index.dtype),
-            "columns_dtype": str(df.columns.dtype)
-            if hasattr(df.columns, "dtype")
-            else "object",
+            "columns_dtype": str(df.columns.dtype),
             "index_name": df.index.name,
             "columns_name": df.columns.name,
             "columns_order": [str(col) for col in df.columns],
@@ -448,8 +486,8 @@ class CacheManager:
         prev_df: pd.DataFrame,
         cur_df: pd.DataFrame,
         timestamp: Optional[datetime] = None,
-    ) -> None:
-        """Save only the changes between prev_df and cur_df."""
+    ) -> ChangeResult:
+        """Save only the changes between prev_df and cur_df and return the changes."""
         if timestamp is None:
             timestamp = datetime.now()
 
@@ -471,15 +509,48 @@ class CacheManager:
             self.conn.execute("INSERT INTO row_additions SELECT * FROM _tmp_row_add")
             self.conn.unregister("_tmp_row_add")
 
+        # Persist row deletions
+        if not changes.row_deletions.empty:
+            rd = changes.row_deletions.copy()
+            rd.insert(0, "table_id", table_id)
+            self.conn.register("_tmp_row_del", rd)
+            self.conn.execute("INSERT INTO row_deletions SELECT * FROM _tmp_row_del")
+            self.conn.unregister("_tmp_row_del")
+
+        # Persist column additions
+        if not changes.column_additions.empty:
+            ca = changes.column_additions.copy()
+            ca.insert(0, "table_id", table_id)
+            self.conn.register("_tmp_col_add", ca)
+            self.conn.execute("INSERT INTO column_additions SELECT * FROM _tmp_col_add")
+            self.conn.unregister("_tmp_col_add")
+
+        # Persist column deletions
+        if not changes.column_deletions.empty:
+            cd = changes.column_deletions.copy()
+            cd.insert(0, "table_id", table_id)
+            self.conn.register("_tmp_col_del", cd)
+            self.conn.execute("INSERT INTO column_deletions SELECT * FROM _tmp_col_del")
+            self.conn.unregister("_tmp_col_del")
+
+        return changes
+
     def get_changes_extended(
         self, prev: pd.DataFrame, cur: pd.DataFrame, timestamp: datetime
     ) -> ChangeResult:
         """Compute changes between prev and cur using Polars for high performance."""
-        cell_df, row_df, meta = self._get_changes_extended_polars(
+        cell_df, row_df, row_deletions_df, col_additions_df, col_deletions_df, meta = self._get_changes_extended_polars(
             prev, cur, timestamp, self.row_change_threshold
         )
 
-        return ChangeResult(cell_changes=cell_df, row_additions=row_df, meta=meta)
+        return ChangeResult(
+            cell_changes=cell_df,
+            row_additions=row_df,
+            row_deletions=row_deletions_df,
+            column_additions=col_additions_df,
+            column_deletions=col_deletions_df,
+            meta=meta
+        )
 
     def _to_pdf_with_key(self, df: pd.DataFrame) -> pd.DataFrame:
         """Normalize pandas DF: index -> __row_key__ column (string)"""
@@ -495,10 +566,10 @@ class CacheManager:
         cur: pd.DataFrame,
         timestamp: datetime,
         row_change_threshold: int = 200,
-    ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
         """
-        Use Polars to compute sparse cell changes and row additions.
-        Returns (cell_changes_df, row_additions_df, meta)
+        Use Polars to compute sparse cell changes, row additions, and deletions.
+        Returns (cell_changes_df, row_additions_df, row_deletions_df, column_deletions_df, meta)
         """
         # Prepare pandas frames with __row_key__
         cur_pdf = self._to_pdf_with_key(cur)
@@ -508,9 +579,9 @@ class CacheManager:
             else pd.DataFrame(columns=["__row_key__"] + list(cur.columns))
         )
 
-        # Convert to Polars
-        p_prev = pl.from_pandas(prev_pdf)
-        p_cur = pl.from_pandas(cur_pdf)
+        # Convert to Polars (preserve NaN for accurate comparison)
+        p_prev = pl.from_pandas(prev_pdf, nan_to_null=False)
+        p_cur = pl.from_pandas(cur_pdf, nan_to_null=False)
 
         # Determine union of data columns (exclude key)
         prev_cols = [c for c in prev_pdf.columns if c != "__row_key__"]
@@ -538,8 +609,9 @@ class CacheManager:
             old_col = col  # Original columns from p_prev don't have suffix
             new_col = f"{col}_new"
             # Mask: not(both null) and values differ
+            # Cast both columns to string for comparison to handle type mismatches
             mask = (~(pl.col(old_col).is_null() & pl.col(new_col).is_null())) & (
-                pl.col(old_col) != pl.col(new_col)
+                pl.col(old_col).cast(pl.Utf8) != pl.col(new_col).cast(pl.Utf8)
             )
             df_changed = (
                 joined.filter(mask)
@@ -583,10 +655,19 @@ class CacheManager:
             else set()
         )
         cur_keys = list(cur.index.astype(str).tolist())
+        cur_keys_set = set(cur_keys)
         new_rows = [k for k in cur_keys if k not in prev_keys]
+
+        # Build row deletions: rows in prev not in cur
+        deleted_rows = [k for k in prev_keys if k not in cur_keys_set]
+
         row_adds = []
         for r in new_rows:
             row_adds.append((str(r), _to_json_str(cur.loc[r].to_dict()), timestamp))
+
+        row_deletions = []
+        for r in deleted_rows:
+            row_deletions.append((str(r), timestamp))
 
         # Build cell changes for non-big rows
         cell_rows = []
@@ -608,21 +689,23 @@ class CacheManager:
                 }
                 row_adds.append((str(br), _to_json_str(row_map), timestamp))
 
-        # New columns: for existing rows, store these as cell_changes
+        # New columns: store as column_additions with full column data
         new_cols = [c for c in cur_cols if c not in prev_cols]
+        col_additions = []
         if new_cols:
-            existing_rows = [ri for ri in cur_keys if ri not in new_rows]
             for c in new_cols:
-                for r in existing_rows:
+                # Extract the full column data as a dictionary {row_key: value}
+                col_data = {}
+                for r in cur_keys:
                     v = cur.at[r, c]
-                    cell_rows.append(
-                        (
-                            str(r),
-                            str(c),
-                            _to_json_str(None if pd.isna(v) else v),
-                            timestamp,
-                        )
-                    )
+                    col_data[str(r)] = None if pd.isna(v) else v
+                col_additions.append((str(c), _to_json_str(col_data), timestamp))
+
+        # Deleted columns: columns in prev not in cur
+        deleted_cols = [c for c in prev_cols if c not in cur_cols]
+        col_deletions = []
+        for c in deleted_cols:
+            col_deletions.append((str(c), timestamp))
 
         cell_df = (
             pd.DataFrame(
@@ -637,12 +720,33 @@ class CacheManager:
             else pd.DataFrame(columns=["row_key", "row_data", "save_time"])
         )
 
+        row_deletions_df = (
+            pd.DataFrame(row_deletions, columns=["row_key", "delete_time"])
+            if row_deletions
+            else pd.DataFrame(columns=["row_key", "delete_time"])
+        )
+
+        col_additions_df = (
+            pd.DataFrame(col_additions, columns=["col_key", "col_data_json", "add_time"])
+            if col_additions
+            else pd.DataFrame(columns=["col_key", "col_data_json", "add_time"])
+        )
+
+        col_deletions_df = (
+            pd.DataFrame(col_deletions, columns=["col_key", "delete_time"])
+            if col_deletions
+            else pd.DataFrame(columns=["col_key", "delete_time"])
+        )
+
         meta = {
             "new_rows": new_rows,
+            "deleted_rows": deleted_rows,
+            "new_cols": new_cols,
+            "deleted_cols": deleted_cols,
             "big_rows": list(big_rows),
             "union_cols": union_cols,
         }
-        return cell_df, row_df, meta
+        return cell_df, row_df, row_deletions_df, col_additions_df, col_deletions_df, meta
 
     def _parse_json_batch(self, json_strings: list[str]) -> list[dict]:
         """Parse JSON strings with orjson -> json fallback."""
@@ -666,8 +770,10 @@ class CacheManager:
         base_data = self._load_base_snapshot(table_id, target_time)
         cell_changes = self._load_and_process_cell_changes(table_id, target_time)
         row_additions = self._load_and_process_row_additions(table_id, target_time)
-        merged_data = self._merge_data_layers(base_data, cell_changes, row_additions)
-        return self._finalize_dataframe(merged_data)
+        column_additions = self._load_and_process_column_additions(table_id, target_time)
+        deleted_rows, deleted_cols = self._load_deletions(table_id, target_time)
+        merged_data = self._merge_data_layers(base_data, cell_changes, row_additions, column_additions)
+        return self._finalize_dataframe(merged_data, deleted_rows, deleted_cols)
 
     def _load_base_snapshot(self, table_id: str, target_time: datetime) -> pl.DataFrame:
         """Load latest snapshot row_data for the table as Polars DataFrame."""
@@ -691,7 +797,7 @@ class CacheManager:
 
             if not base_wide_pdf.empty:
                 base_wide_pdf["row_key"] = row_keys
-                base_pl = pl.from_pandas(base_wide_pdf).with_columns(
+                base_pl = pl.from_pandas(base_wide_pdf, nan_to_null=False).with_columns(
                     pl.col("row_key").cast(pl.Utf8)
                 )
             else:
@@ -725,7 +831,7 @@ class CacheManager:
         except Exception:
             changes_pdf = self.conn.execute(q_changes_latest).fetchdf()
             changes_pl = (
-                pl.from_pandas(changes_pdf)
+                pl.from_pandas(changes_pdf, nan_to_null=False)
                 if not changes_pdf.empty
                 else pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
             )
@@ -812,9 +918,18 @@ class CacheManager:
     def _load_and_process_row_additions(self, table_id: str, target_time: datetime) -> pl.DataFrame:
         """Load and process row additions into wide Polars DataFrame."""
         q_add = f"""
-        SELECT row_key, row_data FROM row_additions
-        WHERE table_id = '{table_id}' AND save_time <= TIMESTAMP '{target_time.isoformat()}'
-        ORDER BY save_time ASC
+        WITH latest_additions AS (
+            SELECT
+                row_key,
+                row_data,
+                ROW_NUMBER() OVER (PARTITION BY row_key ORDER BY save_time DESC) as rn
+            FROM row_additions
+            WHERE table_id = '{table_id}' AND save_time <= TIMESTAMP '{target_time.isoformat()}'
+        )
+        SELECT row_key, row_data
+        FROM latest_additions
+        WHERE rn = 1
+        ORDER BY row_key
         """
         adds_df = self.conn.execute(q_add).fetchdf()
         if not adds_df.empty:
@@ -825,7 +940,7 @@ class CacheManager:
             adds_wide_pdf = pd.json_normalize(parsed_adds)
             if not adds_wide_pdf.empty:
                 adds_wide_pdf["row_key"] = add_row_keys
-                adds_pl = pl.from_pandas(adds_wide_pdf).with_columns(
+                adds_pl = pl.from_pandas(adds_wide_pdf, nan_to_null=False).with_columns(
                     pl.col("row_key").cast(pl.Utf8)
                 )
             else:
@@ -837,10 +952,91 @@ class CacheManager:
 
         return adds_pl
 
+    def _load_deletions(self, table_id: str, target_time: datetime) -> tuple[set[str], set[str]]:
+        """Load row and column deletions up to target_time, considering re-additions."""
+        # Load deleted rows, but exclude those that were re-added later
+        q_row_del = f"""
+        WITH latest_row_events AS (
+            SELECT
+                row_key,
+                'deletion' as event_type,
+                delete_time as event_time
+            FROM row_deletions
+            WHERE table_id = '{table_id}' AND delete_time <= TIMESTAMP '{target_time.isoformat()}'
+
+            UNION ALL
+
+            SELECT
+                row_key,
+                'addition' as event_type,
+                save_time as event_time
+            FROM row_additions
+            WHERE table_id = '{table_id}' AND save_time <= TIMESTAMP '{target_time.isoformat()}'
+        ),
+        latest_per_row AS (
+            SELECT
+                row_key,
+                event_type,
+                event_time,
+                ROW_NUMBER() OVER (PARTITION BY row_key ORDER BY event_time DESC) as rn
+            FROM latest_row_events
+        )
+        SELECT DISTINCT row_key
+        FROM latest_per_row
+        WHERE rn = 1 AND event_type = 'deletion'
+        """
+        row_del_df = self.conn.execute(q_row_del).fetchdf()
+        deleted_rows = set(row_del_df["row_key"].astype(str).tolist()) if not row_del_df.empty else set()
+
+        # Enhanced column deletion tracking with proper multi-cycle support
+        q_col_del = f"""
+        WITH deleted_columns AS (
+            SELECT col_key, delete_time as event_time, 'deletion' as event_type
+            FROM column_deletions
+            WHERE table_id = '{table_id}' AND delete_time <= TIMESTAMP '{target_time.isoformat()}'
+        ),
+        readded_columns AS (
+            -- Track column re-additions from dedicated column_additions table
+            SELECT DISTINCT
+                ca.col_key,
+                ca.add_time as event_time,
+                'addition' as event_type
+            FROM column_additions ca
+            WHERE ca.table_id = '{table_id}'
+                AND ca.add_time <= TIMESTAMP '{target_time.isoformat()}'
+                AND EXISTS (
+                    SELECT 1 FROM column_deletions cd
+                    WHERE cd.table_id = ca.table_id
+                        AND cd.col_key = ca.col_key
+                        AND cd.delete_time < ca.add_time
+                )
+        ),
+        all_column_events AS (
+            SELECT * FROM deleted_columns
+            UNION ALL
+            SELECT * FROM readded_columns
+        ),
+        latest_column_events AS (
+            SELECT
+                col_key,
+                event_type,
+                event_time,
+                ROW_NUMBER() OVER (PARTITION BY col_key ORDER BY event_time DESC) as rn
+            FROM all_column_events
+        )
+        SELECT DISTINCT col_key
+        FROM latest_column_events
+        WHERE rn = 1 AND event_type = 'deletion'
+        """
+        col_del_df = self.conn.execute(q_col_del).fetchdf()
+        deleted_cols = set(col_del_df["col_key"].astype(str).tolist()) if not col_del_df.empty else set()
+
+        return deleted_rows, deleted_cols
+
     def _merge_data_layers(
-        self, base: pl.DataFrame, changes: pl.DataFrame, additions: pl.DataFrame
+        self, base: pl.DataFrame, changes: pl.DataFrame, row_additions: pl.DataFrame, column_additions: dict[str, dict[str, Any]]
     ) -> pl.DataFrame:
-        """Merge three data layers: base snapshot <- cell changes <- row additions."""
+        """Merge four data layers: base snapshot <- cell changes <- row additions <- column additions."""
         # All DataFrames already have row_key as Utf8, so join directly
         merged = base.join(changes, on="row_key", how="full")
 
@@ -867,9 +1063,9 @@ class CacheManager:
             if remaining_deltas:
                 merged = merged.drop(remaining_deltas)
 
-        # Apply additions: join and coalesce (additions have higher precedence)
-        if not additions.is_empty():
-            merged = merged.join(additions, on="row_key", how="full", suffix="_add")
+        # Apply row additions: join and coalesce (row additions have higher precedence)
+        if not row_additions.is_empty():
+            merged = merged.join(row_additions, on="row_key", how="full", suffix="_add")
 
             # Handle row_key from add join
             if "row_key_add" in merged.columns:
@@ -880,13 +1076,18 @@ class CacheManager:
                 ).drop("row_key_add")
 
             # Apply add columns
-            add_cols = [c for c in additions.columns if c != "row_key"]
+            add_cols = [c for c in row_additions.columns if c != "row_key"]
             for c in add_cols:
                 add_col = f"{c}_add"
                 if add_col in merged.columns:
                     if c in merged.columns:
+                        # For rows that exist in row_additions, use add_col values unconditionally (including NaN)
+                        # For rows that don't exist in row_additions, add_col will be null, so use original c
                         merged = merged.with_columns(
-                            pl.coalesce(pl.col(add_col), pl.col(c)).alias(c)
+                            pl.when(pl.col(add_col).is_not_null())
+                            .then(pl.col(add_col))
+                            .otherwise(pl.col(c))
+                            .alias(c)
                         )
                     else:
                         merged = merged.rename({add_col: c})
@@ -896,10 +1097,73 @@ class CacheManager:
             if remaining_adds:
                 merged = merged.drop(remaining_adds)
 
+        # Apply column additions (fourth layer) - highest precedence for new columns
+        if column_additions:
+            for col_key, col_data in column_additions.items():
+                if col_data:  # Skip empty column data
+                    # Create a temporary dataframe with the new column
+                    col_rows = []
+                    for row_key, value in col_data.items():
+                        col_rows.append({"row_key": str(row_key), col_key: value})
+
+                    if col_rows:
+                        # Let Polars infer the correct dtype from data
+                        col_df = pl.DataFrame(col_rows)
+                        # Join the new column to the existing data, handling existing column names
+                        if col_key in merged.columns:
+                            # Column already exists, merge values (column_additions have precedence for their rows)
+                            merged = merged.join(col_df, on="row_key", how="left", suffix="_col_add")
+                            # Use column_additions values where available, otherwise keep existing values
+                            add_col_name = f"{col_key}_col_add"
+                            if add_col_name in merged.columns:
+                                merged = merged.with_columns(
+                                    pl.coalesce(pl.col(add_col_name), pl.col(col_key)).alias(col_key)
+                                ).drop(add_col_name)
+                        else:
+                            # New column, simple join
+                            merged = merged.join(col_df, on="row_key", how="left")
+
         return merged
 
-    def _finalize_dataframe(self, merged: pl.DataFrame) -> pd.DataFrame:
-        """Convert to pandas and apply final formatting."""
+    def _load_and_process_column_additions(self, table_id: str, target_time: datetime) -> dict[str, dict[str, Any]]:
+        """Load column additions up to target_time and return as nested dict {col_key: {row_key: value}}."""
+        q_col_add = f"""
+        WITH latest_column_additions AS (
+            SELECT
+                col_key,
+                col_data_json,
+                ROW_NUMBER() OVER (PARTITION BY col_key ORDER BY add_time DESC) as rn
+            FROM column_additions
+            WHERE table_id = '{table_id}' AND add_time <= TIMESTAMP '{target_time.isoformat()}'
+        )
+        SELECT col_key, col_data_json
+        FROM latest_column_additions
+        WHERE rn = 1
+        """
+        col_add_df = self.conn.execute(q_col_add).fetchdf()
+
+        column_data = {}
+        if not col_add_df.empty:
+            for _, row in col_add_df.iterrows():
+                col_key = str(row["col_key"])
+                try:
+                    col_data = orjson.loads(row["col_data_json"])
+                except Exception:
+                    try:
+                        col_data = json.loads(row["col_data_json"])
+                    except Exception:
+                        col_data = {}
+                column_data[col_key] = col_data
+
+        return column_data
+
+    def _finalize_dataframe(
+        self,
+        merged: pl.DataFrame,
+        deleted_rows: set[str] = None,
+        deleted_cols: set[str] = None
+    ) -> pd.DataFrame:
+        """Convert to pandas and apply final formatting with deletion filtering."""
         if merged.is_empty():
             return pd.DataFrame()
 
@@ -914,6 +1178,12 @@ class CacheManager:
         ]
         if duplicate_cols:
             result_pdf = result_pdf.drop(columns=duplicate_cols)
+
+        # Filter out deleted columns before setting index
+        if deleted_cols:
+            remaining_cols = [col for col in result_pdf.columns if col not in deleted_cols]
+            if remaining_cols:
+                result_pdf = result_pdf[remaining_cols]
 
         # Set row_key as index with smart sorting
         if "row_key" in result_pdf.columns:
@@ -933,9 +1203,17 @@ class CacheManager:
             result_pdf.set_index("row_key", inplace=True)
             result_pdf.index.name = None
 
-        # Filter out invalid rows
+        # Filter out invalid rows and deleted rows
         if not result_pdf.empty:
             result_pdf = result_pdf[result_pdf.index.notna()]
+
+            # Filter out deleted rows
+            if deleted_rows:
+                remaining_rows = [idx for idx in result_pdf.index if str(idx) not in deleted_rows]
+                if remaining_rows:
+                    result_pdf = result_pdf.loc[remaining_rows]
+                else:
+                    result_pdf = pd.DataFrame()
 
         return result_pdf
 
@@ -984,6 +1262,7 @@ class CacheManager:
         # Apply saved dtypes to columns
         for col, dtype_str in dtypes.items():
             if col in result.columns and dtype_str and dtype_str != "None":
+                logger.debug(f"Applying dtype '{dtype_str}' to column '{col}', current dtype: {result[col].dtype}")
                 try:
                     # Since values are stored as strings, convert them back
                     if "int" in dtype_str:
@@ -991,6 +1270,7 @@ class CacheManager:
                         result[col] = pd.to_numeric(
                             result[col], errors="coerce"
                         ).astype(dtype_str)
+                        logger.debug(f"Successfully converted column '{col}' to {dtype_str}")
                     elif "float" in dtype_str:
                         result[col] = pd.to_numeric(
                             result[col], errors="coerce"
@@ -1024,17 +1304,19 @@ class CacheManager:
                             result[col] = result[col].astype(target_dtype)
                         except (ValueError, TypeError):
                             pass
-                except (ValueError, TypeError, Exception):
+                except (ValueError, TypeError, Exception) as e:
                     # Fallback: try to convert from string
+                    logger.debug(f"First dtype conversion failed for column '{col}': {e}")
                     try:
                         if "int" in dtype_str:
                             result[col] = pd.to_numeric(
                                 result[col], errors="coerce"
-                            ).astype("int64")
+                            ).astype(dtype_str)  # Use original dtype_str, not hardcoded int64
+                            logger.debug(f"Fallback conversion successful for column '{col}' to {dtype_str}")
                         elif "float" in dtype_str:
                             result[col] = pd.to_numeric(
                                 result[col], errors="coerce"
-                            ).astype("float64")
+                            ).astype(dtype_str)  # Use original dtype_str, not hardcoded float64
                         elif "bool" in dtype_str:
                             result[col] = (
                                 result[col]
@@ -1042,8 +1324,8 @@ class CacheManager:
                                 .fillna(False)
                                 .astype("bool")
                             )
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e2:
+                        logger.debug(f"Fallback dtype conversion also failed for column '{col}': {e2}, keeping original dtype {result[col].dtype}")
 
         # Apply saved dtype to index
         index_dtype = dtype_mapping.get("index_dtype")
@@ -1139,7 +1421,12 @@ class CacheManager:
         raw_data = self.load_raw_data(key)
         return raw_data is not None
 
-    def save_data(self, key: str, data: pd.DataFrame, timestamp: datetime) -> None:
+    def save_data(
+        self,
+        key: str,
+        data: pd.DataFrame,
+        timestamp: datetime
+    ) -> Optional[ChangeResult]:
         """
         Save DataFrame to cache with timestamp.
 
@@ -1147,13 +1434,18 @@ class CacheManager:
             key: Dataset key
             data: DataFrame to save
             timestamp: Save timestamp
+
+        Returns:
+            ChangeResult if incremental save occurred, None for initial save
         """
         if data.empty:
             logger.warning(f"Attempting to save empty DataFrame for {key}")
-            return
+            return None
 
         # Save dtype mapping separately (maintain compatibility)
         self._save_dtype_mapping(key, data, timestamp)
+
+        changes = None
 
         # Check if this is the first save (no existing data)
         existing_data = self.load_raw_data(key)
@@ -1166,7 +1458,7 @@ class CacheManager:
             # Incremental save - compute diff and save changes
             prev_data = self.load_data(key)
             if not prev_data.empty:
-                self.save_version(key, prev_data, data, timestamp)
+                changes = self.save_version(key, prev_data, data, timestamp)
                 logger.debug(f"Saved incremental changes for {key}")
             else:
                 # Fallback to snapshot if reconstruction failed
@@ -1178,62 +1470,8 @@ class CacheManager:
         hash_timestamp = datetime.now()  # Use current time, not data timestamp
         self._save_data_hash(key, data_hash, hash_timestamp)
 
-    def save_incremental_changes(
-        self,
-        key: str,
-        modifications: list,
-        additions: list,
-        timestamp: datetime,
-        original_df: pd.DataFrame,
-    ) -> None:
-        """
-        Save only the incremental changes using DuckDB storage.
+        return changes
 
-        Args:
-            key: Dataset key
-            modifications: List of Change objects for modifications
-            additions: List of Change objects for additions
-            timestamp: Save timestamp
-            original_df: Original DataFrame to get index/columns names
-        """
-        if not modifications and not additions:
-            logger.debug(f"No changes to save for {key}")
-            return
-
-        # Update dtype mapping
-        self._save_dtype_mapping(key, original_df, timestamp)
-
-        # Convert Change objects to DuckDB format
-        cell_changes_rows = []
-
-        # Process modifications and additions
-        for change in modifications + additions:
-            row_idx, col_idx = change.coord
-            cell_changes_rows.append(
-                (str(row_idx), str(col_idx), _to_json_str(change.new_value), timestamp)
-            )
-
-        if not cell_changes_rows:
-            return
-
-        # Save to DuckDB
-        cell_df = pd.DataFrame(
-            cell_changes_rows, columns=["row_key", "col_key", "value", "save_time"]
-        )
-        cell_df.insert(0, "table_id", key)
-
-        self.conn.register("_tmp_incremental", cell_df)
-        self.conn.execute("INSERT INTO cell_changes SELECT * FROM _tmp_incremental")
-        self.conn.unregister("_tmp_incremental")
-
-        logger.debug(
-            f"Saved {len(cell_changes_rows)} incremental changes for {key} to DuckDB"
-        )
-
-        # Calculate and save data hash with current time (separate from data timestamp)
-        data_hash = self._compute_dataframe_hash(original_df)
-        hash_timestamp = datetime.now()  # Use current time, not data timestamp
-        self._save_data_hash(key, data_hash, hash_timestamp)
 
     def load_data(
         self, key: str, as_of_time: Optional[datetime] = None

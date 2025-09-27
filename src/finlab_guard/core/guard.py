@@ -8,8 +8,12 @@ from typing import Any, Optional, Union
 import pandas as pd
 
 from ..cache.manager import CacheManager
-from ..cache.validator import DataValidator
-from ..utils.exceptions import DataModifiedException, FinlabConnectionException
+from ..utils.exceptions import (
+    DataModifiedException,
+    FinlabConnectionException,
+    InvalidDataTypeException,
+    UnsupportedDataFormatException,
+)
 
 # Global instance to ensure uniqueness
 _global_guard_instance: Optional["FinlabGuard"] = None
@@ -57,7 +61,6 @@ class FinlabGuard:
 
         # Initialize components
         self.cache_manager = CacheManager(self.cache_dir, self.config)
-        self.validator = DataValidator()
 
         # Time context for historical queries
         self.time_context: Optional[datetime] = None
@@ -95,6 +98,30 @@ class FinlabGuard:
 
     def _now(self) -> datetime:
         return datetime.now()
+
+    def validate_dataframe_format(self, df: pd.DataFrame) -> None:
+        """
+        Validate DataFrame format is supported.
+
+        Args:
+            df: DataFrame to validate
+
+        Raises:
+            InvalidDataTypeException: If not a DataFrame
+            UnsupportedDataFormatException: If format is unsupported
+        """
+        if not isinstance(df, pd.DataFrame):
+            raise InvalidDataTypeException(f"Expected DataFrame, got {type(df)}")
+
+        # Check for MultiIndex columns (not supported)
+        if isinstance(df.columns, pd.MultiIndex):
+            raise UnsupportedDataFormatException("MultiIndex columns are not supported")
+
+        # Check for MultiIndex index (not supported)
+        if isinstance(df.index, pd.MultiIndex):
+            raise UnsupportedDataFormatException("MultiIndex index is not supported")
+
+        logger.debug(f"DataFrame validation passed: shape {df.shape}")
 
     def generate_unique_timestamp(self, key: str) -> datetime:
         """
@@ -167,7 +194,7 @@ class FinlabGuard:
             ) from e
 
         # Validate data format
-        self.validator.validate_dataframe_format(new_data)
+        self.validate_dataframe_format(new_data)
 
         # Check if cache exists
         if not self.cache_manager.exists(key):
@@ -196,43 +223,62 @@ class FinlabGuard:
             # Still compute hash for storage, but don't use it for comparison
             new_hash = self.cache_manager._compute_dataframe_hash(new_data)
 
-        # Detect changes
-        modifications, additions = self.validator.detect_changes_detailed(
-            key, new_data, self.cache_manager
-        )
+        # Save data and get changes (includes dtype, hash, and all metadata)
+        timestamp = self.generate_unique_timestamp(key)
+        changes = self.cache_manager.save_data(key, new_data, timestamp)
 
-        if modifications:
-            # Historical data was modified
-            if effective_allow_changes:
-                timestamp = self.generate_unique_timestamp(key)
-                # Use incremental save to only store changes
-                self.cache_manager.save_incremental_changes(
-                    key, modifications, additions, timestamp, new_data
-                )
-                logger.warning(
-                    f"Historical data modified for {key}: {len(modifications)} cells changed"
-                )
-                return new_data
-            else:
+        # Check if changes are allowed (only if we have change details)
+        if changes is not None and not effective_allow_changes:
+            # Check for prohibited change types
+            has_cell_modifications = not changes.cell_changes.empty
+            has_row_deletions = not changes.row_deletions.empty
+            has_column_deletions = not changes.column_deletions.empty
+
+            if has_cell_modifications or has_row_deletions or has_column_deletions:
+                # Build detailed error message
+                error_details = []
+                if has_cell_modifications:
+                    error_details.append(f"{len(changes.cell_changes)} cell modifications")
+                if has_row_deletions:
+                    error_details.append(f"{len(changes.row_deletions)} row deletions")
+                if has_column_deletions:
+                    error_details.append(f"{len(changes.column_deletions)} column deletions")
+
                 raise DataModifiedException(
-                    f"Historical data modified for {key}", modifications
+                    f"Historical data modified for {key}: {', '.join(error_details)}",
+                    changes
                 )
-        else:
-            # Normal case: save only new/updated data incrementally
-            timestamp = self.generate_unique_timestamp(key)
-            if additions:
-                # Only save the additions, no need to save the entire dataset
-                self.cache_manager.save_incremental_changes(
-                    key, [], additions, timestamp, new_data
-                )
-                logger.info(
-                    f"Updated cache for {key}: {len(additions)} new data points"
-                )
+
+        # Log the changes
+        if changes is not None:
+            total_changes = (
+                len(changes.cell_changes) +
+                len(changes.row_additions) +
+                len(changes.row_deletions) +
+                len(changes.column_additions) +
+                len(changes.column_deletions)
+            )
+
+            if total_changes > 0:
+                change_summary = []
+                if not changes.cell_changes.empty:
+                    change_summary.append(f"{len(changes.cell_changes)} cell changes")
+                if not changes.row_additions.empty:
+                    change_summary.append(f"{len(changes.row_additions)} row additions")
+                if not changes.row_deletions.empty:
+                    change_summary.append(f"{len(changes.row_deletions)} row deletions")
+                if not changes.column_additions.empty:
+                    change_summary.append(f"{len(changes.column_additions)} column additions")
+                if not changes.column_deletions.empty:
+                    change_summary.append(f"{len(changes.column_deletions)} column deletions")
+
+                logger.info(f"Updated cache for {key}: {', '.join(change_summary)}")
             else:
-                # Even if no data changes, check and save dtype changes
-                self.cache_manager._save_dtype_mapping(key, new_data, timestamp)
-                logger.info(f"No new data to cache for {key}")
-            return new_data
+                logger.info(f"No changes detected for {key}")
+        else:
+            logger.info(f"First time caching data for {key}")
+
+        return new_data
 
     def _fetch_from_finlab(
         self, key: str, save_to_storage: bool = True, force_download: bool = False

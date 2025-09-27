@@ -1,7 +1,10 @@
 """Custom exceptions for finlab-guard."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..cache.manager import ChangeResult
 
 
 class Change:
@@ -22,16 +25,52 @@ class Change:
 class DataModifiedException(Exception):
     """Raised when historical data has been modified."""
 
-    def __init__(self, message: str, changes: list[Change]):
+    def __init__(self, message: str, changes: Union[list[Change], "ChangeResult"]):
         super().__init__(message)
         self.changes = changes
 
     def __str__(self) -> str:
-        change_details = "\n".join(
-            str(change) for change in self.changes[:5]
-        )  # Show first 5
-        if len(self.changes) > 5:
-            change_details += f"\n... and {len(self.changes) - 5} more changes"
+        # Handle both old Change list format and new ChangeResult format
+        if hasattr(self.changes, 'cell_changes'):
+            # New ChangeResult format
+            change_result = self.changes
+            details = []
+
+            # Add cell changes
+            if not change_result.cell_changes.empty:
+                cell_count = len(change_result.cell_changes)
+                details.append(f"Cell modifications: {cell_count}")
+
+            # Add row deletions
+            if not change_result.row_deletions.empty:
+                row_del_count = len(change_result.row_deletions)
+                details.append(f"Row deletions: {row_del_count}")
+
+            # Add column additions
+            if not change_result.column_additions.empty:
+                col_add_count = len(change_result.column_additions)
+                details.append(f"Column additions: {col_add_count}")
+
+            # Add column deletions
+            if not change_result.column_deletions.empty:
+                col_del_count = len(change_result.column_deletions)
+                details.append(f"Column deletions: {col_del_count}")
+
+            # Add row additions
+            if not change_result.row_additions.empty:
+                row_add_count = len(change_result.row_additions)
+                details.append(f"Row additions: {row_add_count}")
+
+            change_details = "\n".join(details)
+        else:
+            # Old Change list format (for backward compatibility)
+            change_list = self.changes
+            change_details = "\n".join(
+                str(change) for change in change_list[:5]
+            )  # Show first 5
+            if len(change_list) > 5:
+                change_details += f"\n... and {len(change_list) - 5} more changes"
+
         return f"{super().__str__()}\nChanges:\n{change_details}"
 
 

@@ -531,45 +531,6 @@ class TestCacheManager:
 
     # === 增量儲存 ===
 
-    def test_save_incremental_changes(self, cache_manager, sample_dataframe):
-        """Test saving incremental changes."""
-        key = "test_key"
-        timestamp1 = datetime.now()
-        timestamp2 = timestamp1 + timedelta(minutes=1)
-
-        # Save initial data
-        cache_manager.save_data(key, sample_dataframe, timestamp1)
-
-        # Create some changes
-        from finlab_guard.utils.exceptions import Change
-
-        modifications = [Change(("A", "col1"), 1, 99, timestamp2)]
-        additions = [Change(("D", "col1"), None, 4, timestamp2)]
-
-        # Save incremental changes
-        cache_manager.save_incremental_changes(
-            key, modifications, additions, timestamp2, sample_dataframe
-        )
-
-        # Verify changes are reflected in latest data
-        latest_data = cache_manager.get_latest_data(key)
-        assert latest_data.loc["A", "col1"] == 99
-        assert latest_data.loc["D", "col1"] == 4
-
-    def test_save_incremental_changes_empty(self, cache_manager, sample_dataframe):
-        """Test saving empty incremental changes."""
-        key = "test_key"
-        timestamp = datetime.now()
-
-        # Save initial data
-        cache_manager.save_data(key, sample_dataframe, timestamp)
-
-        # Save empty changes
-        cache_manager.save_incremental_changes(key, [], [], timestamp, sample_dataframe)
-
-        # Verify data unchanged
-        latest_data = cache_manager.get_latest_data(key)
-        pd.testing.assert_frame_equal(latest_data, sample_dataframe)
 
     # === 輔助方法 ===
 

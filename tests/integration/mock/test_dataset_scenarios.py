@@ -308,15 +308,32 @@ class TestDatasetScenarios:
 
                 # Verify: exception contains correct change information
                 exception = exc_info.value
-                assert len(exception.changes) > 0, "Should detect modifications"
+                # Check if there are any changes in the ChangeResult
+                total_changes = (
+                    len(exception.changes.cell_changes) +
+                    len(exception.changes.row_additions) +
+                    len(exception.changes.row_deletions) +
+                    len(exception.changes.column_additions) +
+                    len(exception.changes.column_deletions)
+                )
+                assert total_changes > 0, "Should detect modifications"
+
+                # For this test, changes should be in cell_changes
+                assert not exception.changes.cell_changes.empty, "Should have cell changes"
 
                 # Find the modification for index A, col1
-                a_modifications = [
-                    c for c in exception.changes if c.coord == ("A", "col1")
+                cell_changes = exception.changes.cell_changes
+                a_modifications = cell_changes[
+                    (cell_changes['row_key'] == 'A') & (cell_changes['col_key'] == 'col1')
                 ]
                 assert len(a_modifications) == 1, "Should detect A modification"
-                assert a_modifications[0].old_value == 100, "Old value should be 100"
-                assert a_modifications[0].new_value == 105, "New value should be 105"
+                # Note: Values are stored as JSON strings, so we need to parse them
+                import json
+                # The new value should be 105 (stored as JSON)
+                new_value = json.loads(a_modifications.iloc[0]['value'])
+                # Convert to int for comparison since JSON might return string
+                new_value = int(new_value) if isinstance(new_value, str) else new_value
+                assert new_value == 105, f"New value should be 105, got {new_value}"
 
         # Verify: time_context can still access original data (not polluted)
         query_time = initial_time + timedelta(minutes=30)

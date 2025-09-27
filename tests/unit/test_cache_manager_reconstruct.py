@@ -184,7 +184,7 @@ class TestCacheManagerReconstruct:
         empty_changes = pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
         empty_additions = pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
 
-        result = cache_manager._merge_data_layers(empty_base, empty_changes, empty_additions)
+        result = cache_manager._merge_data_layers(empty_base, empty_changes, empty_additions, {})
 
         assert isinstance(result, pl.DataFrame)
         assert result.is_empty()
@@ -209,7 +209,7 @@ class TestCacheManagerReconstruct:
             "B": ["z"]
         })
 
-        result = cache_manager._merge_data_layers(base, changes, additions)
+        result = cache_manager._merge_data_layers(base, changes, additions, {})
 
         assert isinstance(result, pl.DataFrame)
         assert not result.is_empty()

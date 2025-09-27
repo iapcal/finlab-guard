@@ -69,7 +69,6 @@ class TestFinlabGuard:
         assert guard.config is not None
         assert guard.time_context is None
         assert guard.cache_manager is not None
-        assert guard.validator is not None
 
     def test_init_custom_config(self, temp_cache_dir):
         """Test initialization with custom config."""
@@ -607,18 +606,18 @@ class TestCoveragePhaseTesting:
                 {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
             )
 
-            # Mock the validator to verify it's called even for identical data
+            # Mock the cache manager to verify save_data is called even for identical data
             with patch.object(guard, "_fetch_from_finlab", return_value=df1_same):
                 with patch.object(
-                    guard.validator, "detect_changes_detailed"
-                ) as mock_detect:
-                    mock_detect.return_value = ([], [])  # No changes
+                    guard.cache_manager, "save_data"
+                ) as mock_save_data:
+                    mock_save_data.return_value = None  # No changes
 
-                    # Should still call detect_changes_detailed due to force_hash_bypass
+                    # Should still call save_data due to force_hash_bypass
                     result = guard.get("test_key")
 
-                    # Verify detect_changes_detailed was called (bypassed hash optimization)
-                    mock_detect.assert_called_once()
+                    # Verify save_data was called (bypassed hash optimization)
+                    mock_save_data.assert_called_once()
                     pd.testing.assert_frame_equal(result, df1_same)
 
             guard.close()
@@ -652,13 +651,13 @@ class TestCoveragePhaseTesting:
 
             with patch.object(guard, "_fetch_from_finlab", return_value=df1_same):
                 with patch.object(
-                    guard.validator, "detect_changes_detailed"
-                ) as mock_detect:
-                    # Should use hash optimization and return early without calling detect_changes_detailed
+                    guard.cache_manager, "save_data"
+                ) as mock_save_data:
+                    # Should use hash optimization and return early without calling save_data
                     result = guard.get("test_key")
 
-                    # Verify detect_changes_detailed was NOT called (hash optimization worked)
-                    mock_detect.assert_not_called()
+                    # Verify save_data was NOT called (hash optimization worked)
+                    mock_save_data.assert_not_called()
                     pd.testing.assert_frame_equal(result, df1_same)
 
             guard.close()
