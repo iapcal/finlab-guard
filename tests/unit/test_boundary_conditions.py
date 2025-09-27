@@ -322,7 +322,6 @@ class TestCacheBoundaries:
         assert len(dtype_mapping["dtype_history"]) <= 50  # Some may be deduplicated
 
 
-
 class TestConfigurationBoundaries:
     """Test boundary conditions related to configuration."""
 

@@ -310,27 +310,31 @@ class TestDatasetScenarios:
                 exception = exc_info.value
                 # Check if there are any changes in the ChangeResult
                 total_changes = (
-                    len(exception.changes.cell_changes) +
-                    len(exception.changes.row_additions) +
-                    len(exception.changes.row_deletions) +
-                    len(exception.changes.column_additions) +
-                    len(exception.changes.column_deletions)
+                    len(exception.changes.cell_changes)
+                    + len(exception.changes.row_additions)
+                    + len(exception.changes.row_deletions)
+                    + len(exception.changes.column_additions)
+                    + len(exception.changes.column_deletions)
                 )
                 assert total_changes > 0, "Should detect modifications"
 
                 # For this test, changes should be in cell_changes
-                assert not exception.changes.cell_changes.empty, "Should have cell changes"
+                assert not exception.changes.cell_changes.empty, (
+                    "Should have cell changes"
+                )
 
                 # Find the modification for index A, col1
                 cell_changes = exception.changes.cell_changes
                 a_modifications = cell_changes[
-                    (cell_changes['row_key'] == 'A') & (cell_changes['col_key'] == 'col1')
+                    (cell_changes["row_key"] == "A")
+                    & (cell_changes["col_key"] == "col1")
                 ]
                 assert len(a_modifications) == 1, "Should detect A modification"
                 # Note: Values are stored as JSON strings, so we need to parse them
                 import json
+
                 # The new value should be 105 (stored as JSON)
-                new_value = json.loads(a_modifications.iloc[0]['value'])
+                new_value = json.loads(a_modifications.iloc[0]["value"])
                 # Convert to int for comparison since JSON might return string
                 new_value = int(new_value) if isinstance(new_value, str) else new_value
                 assert new_value == 105, f"New value should be 105, got {new_value}"

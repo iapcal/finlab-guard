@@ -238,25 +238,29 @@ class FinlabGuard:
                 # Build detailed error message
                 error_details = []
                 if has_cell_modifications:
-                    error_details.append(f"{len(changes.cell_changes)} cell modifications")
+                    error_details.append(
+                        f"{len(changes.cell_changes)} cell modifications"
+                    )
                 if has_row_deletions:
                     error_details.append(f"{len(changes.row_deletions)} row deletions")
                 if has_column_deletions:
-                    error_details.append(f"{len(changes.column_deletions)} column deletions")
+                    error_details.append(
+                        f"{len(changes.column_deletions)} column deletions"
+                    )
 
                 raise DataModifiedException(
                     f"Historical data modified for {key}: {', '.join(error_details)}",
-                    changes
+                    changes,
                 )
 
         # Log the changes
         if changes is not None:
             total_changes = (
-                len(changes.cell_changes) +
-                len(changes.row_additions) +
-                len(changes.row_deletions) +
-                len(changes.column_additions) +
-                len(changes.column_deletions)
+                len(changes.cell_changes)
+                + len(changes.row_additions)
+                + len(changes.row_deletions)
+                + len(changes.column_additions)
+                + len(changes.column_deletions)
             )
 
             if total_changes > 0:
@@ -268,9 +272,13 @@ class FinlabGuard:
                 if not changes.row_deletions.empty:
                     change_summary.append(f"{len(changes.row_deletions)} row deletions")
                 if not changes.column_additions.empty:
-                    change_summary.append(f"{len(changes.column_additions)} column additions")
+                    change_summary.append(
+                        f"{len(changes.column_additions)} column additions"
+                    )
                 if not changes.column_deletions.empty:
-                    change_summary.append(f"{len(changes.column_deletions)} column deletions")
+                    change_summary.append(
+                        f"{len(changes.column_deletions)} column deletions"
+                    )
 
                 logger.info(f"Updated cache for {key}: {', '.join(change_summary)}")
             else:

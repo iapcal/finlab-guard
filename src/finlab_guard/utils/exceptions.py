@@ -1,7 +1,7 @@
 """Custom exceptions for finlab-guard."""
 
 from datetime import datetime
-from typing import Any, Union, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
     from ..cache.manager import ChangeResult
@@ -31,9 +31,12 @@ class DataModifiedException(Exception):
 
     def __str__(self) -> str:
         # Handle both old Change list format and new ChangeResult format
-        if hasattr(self.changes, 'cell_changes'):
+        if hasattr(self.changes, "cell_changes"):
             # New ChangeResult format
+            from ..cache.manager import ChangeResult
+
             change_result = self.changes
+            assert isinstance(change_result, ChangeResult)  # Type narrowing for mypy
             details = []
 
             # Add cell changes

@@ -539,8 +539,10 @@ class CacheManager:
         self, prev: pd.DataFrame, cur: pd.DataFrame, timestamp: datetime
     ) -> ChangeResult:
         """Compute changes between prev and cur using Polars for high performance."""
-        cell_df, row_df, row_deletions_df, col_additions_df, col_deletions_df, meta = self._get_changes_extended_polars(
-            prev, cur, timestamp, self.row_change_threshold
+        cell_df, row_df, row_deletions_df, col_additions_df, col_deletions_df, meta = (
+            self._get_changes_extended_polars(
+                prev, cur, timestamp, self.row_change_threshold
+            )
         )
 
         return ChangeResult(
@@ -549,7 +551,7 @@ class CacheManager:
             row_deletions=row_deletions_df,
             column_additions=col_additions_df,
             column_deletions=col_deletions_df,
-            meta=meta
+            meta=meta,
         )
 
     def _to_pdf_with_key(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -566,10 +568,17 @@ class CacheManager:
         cur: pd.DataFrame,
         timestamp: datetime,
         row_change_threshold: int = 200,
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    ) -> tuple[
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
+        dict[str, Any],
+    ]:
         """
         Use Polars to compute sparse cell changes, row additions, and deletions.
-        Returns (cell_changes_df, row_additions_df, row_deletions_df, column_deletions_df, meta)
+        Returns (cell_changes_df, row_additions_df, row_deletions_df, column_additions_df, column_deletions_df, meta)
         """
         # Prepare pandas frames with __row_key__
         cur_pdf = self._to_pdf_with_key(cur)
@@ -727,7 +736,9 @@ class CacheManager:
         )
 
         col_additions_df = (
-            pd.DataFrame(col_additions, columns=["col_key", "col_data_json", "add_time"])
+            pd.DataFrame(
+                col_additions, columns=["col_key", "col_data_json", "add_time"]
+            )
             if col_additions
             else pd.DataFrame(columns=["col_key", "col_data_json", "add_time"])
         )
@@ -746,7 +757,14 @@ class CacheManager:
             "big_rows": list(big_rows),
             "union_cols": union_cols,
         }
-        return cell_df, row_df, row_deletions_df, col_additions_df, col_deletions_df, meta
+        return (
+            cell_df,
+            row_df,
+            row_deletions_df,
+            col_additions_df,
+            col_deletions_df,
+            meta,
+        )
 
     def _parse_json_batch(self, json_strings: list[str]) -> list[dict]:
         """Parse JSON strings with orjson -> json fallback."""
@@ -770,9 +788,13 @@ class CacheManager:
         base_data = self._load_base_snapshot(table_id, target_time)
         cell_changes = self._load_and_process_cell_changes(table_id, target_time)
         row_additions = self._load_and_process_row_additions(table_id, target_time)
-        column_additions = self._load_and_process_column_additions(table_id, target_time)
+        column_additions = self._load_and_process_column_additions(
+            table_id, target_time
+        )
         deleted_rows, deleted_cols = self._load_deletions(table_id, target_time)
-        merged_data = self._merge_data_layers(base_data, cell_changes, row_additions, column_additions)
+        merged_data = self._merge_data_layers(
+            base_data, cell_changes, row_additions, column_additions
+        )
         return self._finalize_dataframe(merged_data, deleted_rows, deleted_cols)
 
     def _load_base_snapshot(self, table_id: str, target_time: datetime) -> pl.DataFrame:
@@ -807,7 +829,9 @@ class CacheManager:
 
         return base_pl
 
-    def _load_and_process_cell_changes(self, table_id: str, target_time: datetime) -> pl.DataFrame:
+    def _load_and_process_cell_changes(
+        self, table_id: str, target_time: datetime
+    ) -> pl.DataFrame:
         """Load and process cell changes into pivoted Polars DataFrame."""
         q_changes_latest = f"""
         SELECT row_key, col_key, value FROM (
@@ -823,11 +847,10 @@ class CacheManager:
             changes_arrow = self.conn.execute(q_changes_latest).arrow()
             if hasattr(changes_arrow, "read_all"):
                 changes_arrow = changes_arrow.read_all()
-            changes_pl = (
-                pl.from_arrow(changes_arrow)
-                if changes_arrow.num_rows > 0
-                else pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
-            )
+            if changes_arrow.num_rows > 0:
+                changes_pl: pl.DataFrame = pl.from_arrow(changes_arrow)  # type: ignore[assignment]
+            else:
+                changes_pl = pl.DataFrame({"row_key": pl.Series([], dtype=pl.Utf8)})
         except Exception:
             changes_pdf = self.conn.execute(q_changes_latest).fetchdf()
             changes_pl = (
@@ -840,19 +863,20 @@ class CacheManager:
         if not changes_pl.is_empty():
             # Parse JSON values directly in Polars using map_elements
             # Keep the original _parse_json_value logic but ensure string output for Polars
-            def parse_and_stringify(value):
+            def parse_and_stringify(value: str) -> str:
                 """Parse JSON and ensure string output for Polars compatibility."""
                 parsed = self._parse_json_value(value)
                 return str(parsed) if parsed is not None else ""
 
-            changes_pl = changes_pl.with_columns([
-                pl.col("row_key").cast(pl.Utf8),
-                pl.col("col_key").cast(pl.Utf8),
-                pl.col("value").map_elements(
-                    parse_and_stringify,
-                    return_dtype=pl.Utf8
-                ).alias("value")
-            ])
+            changes_pl = changes_pl.with_columns(
+                [
+                    pl.col("row_key").cast(pl.Utf8),
+                    pl.col("col_key").cast(pl.Utf8),
+                    pl.col("value")
+                    .map_elements(parse_and_stringify, return_dtype=pl.Utf8)
+                    .alias("value"),
+                ]
+            )
 
             # Simplified pivot with single try
             try:
@@ -915,7 +939,9 @@ class CacheManager:
                     return x
         return x
 
-    def _load_and_process_row_additions(self, table_id: str, target_time: datetime) -> pl.DataFrame:
+    def _load_and_process_row_additions(
+        self, table_id: str, target_time: datetime
+    ) -> pl.DataFrame:
         """Load and process row additions into wide Polars DataFrame."""
         q_add = f"""
         WITH latest_additions AS (
@@ -952,7 +978,9 @@ class CacheManager:
 
         return adds_pl
 
-    def _load_deletions(self, table_id: str, target_time: datetime) -> tuple[set[str], set[str]]:
+    def _load_deletions(
+        self, table_id: str, target_time: datetime
+    ) -> tuple[set[str], set[str]]:
         """Load row and column deletions up to target_time, considering re-additions."""
         # Load deleted rows, but exclude those that were re-added later
         q_row_del = f"""
@@ -986,7 +1014,11 @@ class CacheManager:
         WHERE rn = 1 AND event_type = 'deletion'
         """
         row_del_df = self.conn.execute(q_row_del).fetchdf()
-        deleted_rows = set(row_del_df["row_key"].astype(str).tolist()) if not row_del_df.empty else set()
+        deleted_rows = (
+            set(row_del_df["row_key"].astype(str).tolist())
+            if not row_del_df.empty
+            else set()
+        )
 
         # Enhanced column deletion tracking with proper multi-cycle support
         q_col_del = f"""
@@ -1029,12 +1061,20 @@ class CacheManager:
         WHERE rn = 1 AND event_type = 'deletion'
         """
         col_del_df = self.conn.execute(q_col_del).fetchdf()
-        deleted_cols = set(col_del_df["col_key"].astype(str).tolist()) if not col_del_df.empty else set()
+        deleted_cols = (
+            set(col_del_df["col_key"].astype(str).tolist())
+            if not col_del_df.empty
+            else set()
+        )
 
         return deleted_rows, deleted_cols
 
     def _merge_data_layers(
-        self, base: pl.DataFrame, changes: pl.DataFrame, row_additions: pl.DataFrame, column_additions: dict[str, dict[str, Any]]
+        self,
+        base: pl.DataFrame,
+        changes: pl.DataFrame,
+        row_additions: pl.DataFrame,
+        column_additions: dict[str, dict[str, Any]],
     ) -> pl.DataFrame:
         """Merge four data layers: base snapshot <- cell changes <- row additions <- column additions."""
         # All DataFrames already have row_key as Utf8, so join directly
@@ -1112,12 +1152,16 @@ class CacheManager:
                         # Join the new column to the existing data, handling existing column names
                         if col_key in merged.columns:
                             # Column already exists, merge values (column_additions have precedence for their rows)
-                            merged = merged.join(col_df, on="row_key", how="left", suffix="_col_add")
+                            merged = merged.join(
+                                col_df, on="row_key", how="left", suffix="_col_add"
+                            )
                             # Use column_additions values where available, otherwise keep existing values
                             add_col_name = f"{col_key}_col_add"
                             if add_col_name in merged.columns:
                                 merged = merged.with_columns(
-                                    pl.coalesce(pl.col(add_col_name), pl.col(col_key)).alias(col_key)
+                                    pl.coalesce(
+                                        pl.col(add_col_name), pl.col(col_key)
+                                    ).alias(col_key)
                                 ).drop(add_col_name)
                         else:
                             # New column, simple join
@@ -1125,7 +1169,9 @@ class CacheManager:
 
         return merged
 
-    def _load_and_process_column_additions(self, table_id: str, target_time: datetime) -> dict[str, dict[str, Any]]:
+    def _load_and_process_column_additions(
+        self, table_id: str, target_time: datetime
+    ) -> dict[str, dict[str, Any]]:
         """Load column additions up to target_time and return as nested dict {col_key: {row_key: value}}."""
         q_col_add = f"""
         WITH latest_column_additions AS (
@@ -1160,8 +1206,8 @@ class CacheManager:
     def _finalize_dataframe(
         self,
         merged: pl.DataFrame,
-        deleted_rows: set[str] = None,
-        deleted_cols: set[str] = None
+        deleted_rows: Optional[set[str]] = None,
+        deleted_cols: Optional[set[str]] = None,
     ) -> pd.DataFrame:
         """Convert to pandas and apply final formatting with deletion filtering."""
         if merged.is_empty():
@@ -1181,7 +1227,9 @@ class CacheManager:
 
         # Filter out deleted columns before setting index
         if deleted_cols:
-            remaining_cols = [col for col in result_pdf.columns if col not in deleted_cols]
+            remaining_cols = [
+                col for col in result_pdf.columns if col not in deleted_cols
+            ]
             if remaining_cols:
                 result_pdf = result_pdf[remaining_cols]
 
@@ -1209,7 +1257,9 @@ class CacheManager:
 
             # Filter out deleted rows
             if deleted_rows:
-                remaining_rows = [idx for idx in result_pdf.index if str(idx) not in deleted_rows]
+                remaining_rows = [
+                    idx for idx in result_pdf.index if str(idx) not in deleted_rows
+                ]
                 if remaining_rows:
                     result_pdf = result_pdf.loc[remaining_rows]
                 else:
@@ -1262,7 +1312,9 @@ class CacheManager:
         # Apply saved dtypes to columns
         for col, dtype_str in dtypes.items():
             if col in result.columns and dtype_str and dtype_str != "None":
-                logger.debug(f"Applying dtype '{dtype_str}' to column '{col}', current dtype: {result[col].dtype}")
+                logger.debug(
+                    f"Applying dtype '{dtype_str}' to column '{col}', current dtype: {result[col].dtype}"
+                )
                 try:
                     # Since values are stored as strings, convert them back
                     if "int" in dtype_str:
@@ -1270,7 +1322,9 @@ class CacheManager:
                         result[col] = pd.to_numeric(
                             result[col], errors="coerce"
                         ).astype(dtype_str)
-                        logger.debug(f"Successfully converted column '{col}' to {dtype_str}")
+                        logger.debug(
+                            f"Successfully converted column '{col}' to {dtype_str}"
+                        )
                     elif "float" in dtype_str:
                         result[col] = pd.to_numeric(
                             result[col], errors="coerce"
@@ -1306,17 +1360,25 @@ class CacheManager:
                             pass
                 except (ValueError, TypeError, Exception) as e:
                     # Fallback: try to convert from string
-                    logger.debug(f"First dtype conversion failed for column '{col}': {e}")
+                    logger.debug(
+                        f"First dtype conversion failed for column '{col}': {e}"
+                    )
                     try:
                         if "int" in dtype_str:
                             result[col] = pd.to_numeric(
                                 result[col], errors="coerce"
-                            ).astype(dtype_str)  # Use original dtype_str, not hardcoded int64
-                            logger.debug(f"Fallback conversion successful for column '{col}' to {dtype_str}")
+                            ).astype(
+                                dtype_str
+                            )  # Use original dtype_str, not hardcoded int64
+                            logger.debug(
+                                f"Fallback conversion successful for column '{col}' to {dtype_str}"
+                            )
                         elif "float" in dtype_str:
                             result[col] = pd.to_numeric(
                                 result[col], errors="coerce"
-                            ).astype(dtype_str)  # Use original dtype_str, not hardcoded float64
+                            ).astype(
+                                dtype_str
+                            )  # Use original dtype_str, not hardcoded float64
                         elif "bool" in dtype_str:
                             result[col] = (
                                 result[col]
@@ -1325,7 +1387,9 @@ class CacheManager:
                                 .astype("bool")
                             )
                     except (ValueError, TypeError) as e2:
-                        logger.debug(f"Fallback dtype conversion also failed for column '{col}': {e2}, keeping original dtype {result[col].dtype}")
+                        logger.debug(
+                            f"Fallback dtype conversion also failed for column '{col}': {e2}, keeping original dtype {result[col].dtype}"
+                        )
 
         # Apply saved dtype to index
         index_dtype = dtype_mapping.get("index_dtype")
@@ -1422,10 +1486,7 @@ class CacheManager:
         return raw_data is not None
 
     def save_data(
-        self,
-        key: str,
-        data: pd.DataFrame,
-        timestamp: datetime
+        self, key: str, data: pd.DataFrame, timestamp: datetime
     ) -> Optional[ChangeResult]:
         """
         Save DataFrame to cache with timestamp.
@@ -1471,7 +1532,6 @@ class CacheManager:
         self._save_data_hash(key, data_hash, hash_timestamp)
 
         return changes
-
 
     def load_data(
         self, key: str, as_of_time: Optional[datetime] = None

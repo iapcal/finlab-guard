@@ -608,9 +608,7 @@ class TestCoveragePhaseTesting:
 
             # Mock the cache manager to verify save_data is called even for identical data
             with patch.object(guard, "_fetch_from_finlab", return_value=df1_same):
-                with patch.object(
-                    guard.cache_manager, "save_data"
-                ) as mock_save_data:
+                with patch.object(guard.cache_manager, "save_data") as mock_save_data:
                     mock_save_data.return_value = None  # No changes
 
                     # Should still call save_data due to force_hash_bypass
@@ -650,9 +648,7 @@ class TestCoveragePhaseTesting:
             )
 
             with patch.object(guard, "_fetch_from_finlab", return_value=df1_same):
-                with patch.object(
-                    guard.cache_manager, "save_data"
-                ) as mock_save_data:
+                with patch.object(guard.cache_manager, "save_data") as mock_save_data:
                     # Should use hash optimization and return early without calling save_data
                     result = guard.get("test_key")
 
