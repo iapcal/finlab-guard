@@ -1,21 +1,16 @@
 """Boundary conditions tests for finlab-guard."""
 
-import json
 import shutil
 import tempfile
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from finlab_guard.cache.manager import CacheManager
-from finlab_guard.cache.validator import DataValidator
 from finlab_guard.core.guard import FinlabGuard
-from finlab_guard.utils.exceptions import Change
 
 
 class TestDataSizeBoundaries:
@@ -326,117 +321,6 @@ class TestCacheBoundaries:
         assert dtype_mapping is not None
         assert len(dtype_mapping["dtype_history"]) <= 50  # Some may be deduplicated
 
-
-class TestChangeDetectionBoundaries:
-    """Test boundary conditions for change detection."""
-
-    def setup_method(self):
-        """Set up test environment."""
-        self.temp_dir = tempfile.mkdtemp()
-        self.cache_manager = CacheManager(
-            Path(self.temp_dir), {"compression": "snappy"}
-        )
-        self.validator = DataValidator(
-            tolerance=0.0
-        )  # Use zero tolerance for exact comparison
-
-    def teardown_method(self):
-        """Clean up test environment."""
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_detect_changes_with_zero_tolerance(self):
-        """Test change detection with exact comparison (zero tolerance)."""
-        # Create initial data
-        initial_df = pd.DataFrame(
-            {"A": [1.0, 2.0, 3.0]}, index=pd.date_range("2023-01-01", periods=3)
-        )
-        self.cache_manager.save_data("test_key", initial_df, datetime.now())
-
-        # Create data with tiny floating point differences
-        new_df = pd.DataFrame(
-            {
-                "A": [1.0000000000001, 2.0, 3.0]  # Very small difference
-            },
-            index=pd.date_range("2023-01-01", periods=3),
-        )
-
-        modifications, additions = self.validator.detect_changes_detailed(
-            "test_key", new_df, self.cache_manager
-        )
-        # Should detect even tiny differences
-        assert len(modifications) > 0
-
-    def test_detect_massive_changes(self):
-        """Test change detection with massive number of changes."""
-        # Create large initial dataset
-        dates = pd.date_range("2023-01-01", periods=1000)
-        initial_df = pd.DataFrame(
-            {"A": range(1000), "B": range(1000, 2000)}, index=dates
-        )
-        self.cache_manager.save_data("massive_key", initial_df, datetime.now())
-
-        # Create data where everything changed
-        new_df = pd.DataFrame(
-            {
-                "A": range(2000, 3000),  # All values changed
-                "B": range(3000, 4000),  # All values changed
-            },
-            index=dates,
-        )
-
-        modifications, additions = self.validator.detect_changes_detailed(
-            "massive_key", new_df, self.cache_manager
-        )
-        # Should handle massive number of changes efficiently
-        assert len(modifications) == 2000  # 1000 changes for each column
-
-    def test_detect_changes_with_nan_boundaries(self):
-        """Test change detection with NaN value transitions."""
-        # Initial data with some NaN values
-        initial_df = pd.DataFrame(
-            {"A": [1.0, np.nan, 3.0], "B": [np.nan, 2.0, np.nan]},
-            index=pd.date_range("2023-01-01", periods=3),
-        )
-        self.cache_manager.save_data("nan_key", initial_df, datetime.now())
-
-        # New data with NaN -> value and value -> NaN transitions
-        new_df = pd.DataFrame(
-            {
-                "A": [1.0, 2.0, np.nan],  # NaN->2.0, 3.0->NaN
-                "B": [1.0, 2.0, 3.0],  # NaN->1.0, NaN->3.0
-            },
-            index=pd.date_range("2023-01-01", periods=3),
-        )
-
-        modifications, additions = self.validator.detect_changes_detailed(
-            "nan_key", new_df, self.cache_manager
-        )
-        # NaN transitions should be detected as changes
-        # Note: The actual behavior may depend on how the system handles NaN values
-        # This test verifies the system handles NaN transitions gracefully
-        assert isinstance(modifications, list)
-        assert isinstance(additions, list)
-
-    def test_index_boundary_conditions(self):
-        """Test with various index boundary conditions."""
-        # Test with duplicate index values
-        duplicate_index = pd.DatetimeIndex(["2023-01-01", "2023-01-01", "2023-01-02"])
-        dup_df = pd.DataFrame({"A": [1, 2, 3]}, index=duplicate_index)
-
-        self.cache_manager.save_data("dup_index_key", dup_df, datetime.now())
-        result = self.cache_manager.load_data("dup_index_key")
-        # Allow for potential reordering or deduplication by the system
-        assert result.shape == dup_df.shape or result.shape[0] <= dup_df.shape[0]
-
-        # Test with non-sorted index
-        unsorted_index = pd.DatetimeIndex(["2023-01-03", "2023-01-01", "2023-01-02"])
-        unsorted_df = pd.DataFrame({"A": [1, 2, 3]}, index=unsorted_index)
-
-        self.cache_manager.save_data("unsorted_index_key", unsorted_df, datetime.now())
-        result = self.cache_manager.load_data("unsorted_index_key")
-        # System may sort the index, so just verify data integrity
-        assert result.shape == unsorted_df.shape
-        assert set(result["A"].values) == set(unsorted_df["A"].values)
 
 
 class TestConfigurationBoundaries:

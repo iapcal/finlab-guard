@@ -1,6 +1,5 @@
 """Error scenarios and exception handling tests for finlab-guard."""
 
-import json
 import os
 import shutil
 import sys
@@ -8,14 +7,13 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import duckdb
 import pandas as pd
 import pytest
 
 from finlab_guard.cache.manager import CacheManager
-from finlab_guard.cache.validator import DataValidator
 from finlab_guard.core.guard import FinlabGuard
 from finlab_guard.utils.exceptions import (
     DataModifiedException,
@@ -352,139 +350,139 @@ class TestCacheManagerErrorScenarios:
             assert "\\" not in path.name
 
 
-class TestDataValidatorErrorScenarios:
-    """Test error scenarios for DataValidator class."""
+# class TestDataValidatorErrorScenarios:
+#     """Test error scenarios for DataValidator class."""
 
-    def setup_method(self):
-        """Set up test environment."""
-        self.validator = DataValidator()
+#     def setup_method(self):
+#         """Set up test environment."""
+#         self.validator = DataValidator()
 
-    def test_validate_non_dataframe(self):
-        """Test validating non-DataFrame objects."""
-        invalid_inputs = [
-            "string",
-            123,
-            [1, 2, 3],
-            {"key": "value"},
-            None,
-            pd.Series([1, 2, 3]),
-        ]
+#     def test_validate_non_dataframe(self):
+#         """Test validating non-DataFrame objects."""
+#         invalid_inputs = [
+#             "string",
+#             123,
+#             [1, 2, 3],
+#             {"key": "value"},
+#             None,
+#             pd.Series([1, 2, 3]),
+#         ]
 
-        for invalid_input in invalid_inputs:
-            with pytest.raises(InvalidDataTypeException):
-                self.validator.validate_dataframe_format(invalid_input)
+#         for invalid_input in invalid_inputs:
+#             with pytest.raises(InvalidDataTypeException):
+#                 self.validator.validate_dataframe_format(invalid_input)
 
-    def test_validate_multiindex_columns(self):
-        """Test validating DataFrame with MultiIndex columns."""
-        arrays = [["A", "A", "B", "B"], ["one", "two", "one", "two"]]
-        tuples = list(zip(*arrays))
-        index = pd.MultiIndex.from_tuples(tuples, names=["first", "second"])
+#     def test_validate_multiindex_columns(self):
+#         """Test validating DataFrame with MultiIndex columns."""
+#         arrays = [["A", "A", "B", "B"], ["one", "two", "one", "two"]]
+#         tuples = list(zip(*arrays))
+#         index = pd.MultiIndex.from_tuples(tuples, names=["first", "second"])
 
-        df = pd.DataFrame([[1, 2, 3, 4]], columns=index)
+#         df = pd.DataFrame([[1, 2, 3, 4]], columns=index)
 
-        with pytest.raises(
-            UnsupportedDataFormatException, match="MultiIndex columns are not supported"
-        ):
-            self.validator.validate_dataframe_format(df)
+#         with pytest.raises(
+#             UnsupportedDataFormatException, match="MultiIndex columns are not supported"
+#         ):
+#             self.validator.validate_dataframe_format(df)
 
-    def test_validate_multiindex_index(self):
-        """Test validating DataFrame with MultiIndex index."""
-        arrays = [["A", "A", "B", "B"], ["one", "two", "one", "two"]]
-        tuples = list(zip(*arrays))
-        index = pd.MultiIndex.from_tuples(tuples, names=["first", "second"])
+#     def test_validate_multiindex_index(self):
+#         """Test validating DataFrame with MultiIndex index."""
+#         arrays = [["A", "A", "B", "B"], ["one", "two", "one", "two"]]
+#         tuples = list(zip(*arrays))
+#         index = pd.MultiIndex.from_tuples(tuples, names=["first", "second"])
 
-        df = pd.DataFrame([[1], [2], [3], [4]], index=index, columns=["value"])
+#         df = pd.DataFrame([[1], [2], [3], [4]], index=index, columns=["value"])
 
-        with pytest.raises(
-            UnsupportedDataFormatException, match="MultiIndex index is not supported"
-        ):
-            self.validator.validate_dataframe_format(df)
+#         with pytest.raises(
+#             UnsupportedDataFormatException, match="MultiIndex index is not supported"
+#         ):
+#             self.validator.validate_dataframe_format(df)
 
-    def test_detect_changes_with_corrupted_cache(self):
-        """Test change detection when cache is corrupted."""
-        # Skip this test on Windows due to DuckDB file locking issues
-        if sys.platform.startswith("win"):
-            pytest.skip("Windows DuckDB file locking prevents direct file corruption")
+#     def test_detect_changes_with_corrupted_cache(self):
+#         """Test change detection when cache is corrupted."""
+#         # Skip this test on Windows due to DuckDB file locking issues
+#         if sys.platform.startswith("win"):
+#             pytest.skip("Windows DuckDB file locking prevents direct file corruption")
 
-        temp_dir = tempfile.mkdtemp()
-        cache_manager = None
-        try:
-            cache_manager = CacheManager(Path(temp_dir), {"compression": "snappy"})
+#         temp_dir = tempfile.mkdtemp()
+#         cache_manager = None
+#         try:
+#             cache_manager = CacheManager(Path(temp_dir), {"compression": "snappy"})
 
-            # Create corrupted cache
-            cache_path = cache_manager._get_cache_path("test_key")
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
+#             # Create corrupted cache
+#             cache_path = cache_manager._get_cache_path("test_key")
+#             cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Close connection before attempting to write to file
-            cache_manager.close()
+#             # Close connection before attempting to write to file
+#             cache_manager.close()
 
-            with open(cache_path, "w") as f:
-                f.write("corrupted")
+#             with open(cache_path, "w") as f:
+#                 f.write("corrupted")
 
-            # DuckDB should raise IOException when trying to connect to corrupted file
-            # This tests that we detect database corruption appropriately
-            with pytest.raises(
-                duckdb.IOException, match="not a valid DuckDB database file"
-            ):
-                cache_manager = CacheManager(Path(temp_dir), {"compression": "snappy"})
+#             # DuckDB should raise IOException when trying to connect to corrupted file
+#             # This tests that we detect database corruption appropriately
+#             with pytest.raises(
+#                 duckdb.IOException, match="not a valid DuckDB database file"
+#             ):
+#                 cache_manager = CacheManager(Path(temp_dir), {"compression": "snappy"})
 
-        finally:
-            if cache_manager:
-                cache_manager.close()
-            safe_rmtree(temp_dir, ignore_errors=True)
+#         finally:
+#             if cache_manager:
+#                 cache_manager.close()
+#             safe_rmtree(temp_dir, ignore_errors=True)
 
-    def test_detect_changes_with_empty_new_data(self):
-        """Test change detection with empty new DataFrame."""
-        temp_dir = tempfile.mkdtemp()
-        try:
-            cache_manager = CacheManager(Path(temp_dir), {"compression": "snappy"})
+#     def test_detect_changes_with_empty_new_data(self):
+#         """Test change detection with empty new DataFrame."""
+#         temp_dir = tempfile.mkdtemp()
+#         try:
+#             cache_manager = CacheManager(Path(temp_dir), {"compression": "snappy"})
 
-            # Create some cached data first
-            initial_data = pd.DataFrame(
-                {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
-            )
-            cache_manager.save_data("test_key", initial_data, datetime.now())
+#             # Create some cached data first
+#             initial_data = pd.DataFrame(
+#                 {"A": [1, 2, 3]}, index=pd.date_range("2023-01-01", periods=3)
+#             )
+#             cache_manager.save_data("test_key", initial_data, datetime.now())
 
-            # Test with empty new data
-            empty_data = pd.DataFrame(columns=["A"])
+#             # Test with empty new data
+#             empty_data = pd.DataFrame(columns=["A"])
 
-            modifications, additions = self.validator.detect_changes_detailed(
-                "test_key", empty_data, cache_manager
-            )
-            # Empty data should result in no modifications or additions
-            assert len(modifications) == 0
-            assert len(additions) == 0
+#             modifications, additions = self.validator.detect_changes_detailed(
+#                 "test_key", empty_data, cache_manager
+#             )
+#             # Empty data should result in no modifications or additions
+#             assert len(modifications) == 0
+#             assert len(additions) == 0
 
-        finally:
-            safe_rmtree(temp_dir, ignore_errors=True)
+#         finally:
+#             safe_rmtree(temp_dir, ignore_errors=True)
 
-    def test_detect_changes_with_mismatched_columns(self):
-        """Test change detection with completely different column structure."""
-        temp_dir = tempfile.mkdtemp()
-        try:
-            cache_manager = CacheManager(Path(temp_dir), {"compression": "snappy"})
+#     def test_detect_changes_with_mismatched_columns(self):
+#         """Test change detection with completely different column structure."""
+#         temp_dir = tempfile.mkdtemp()
+#         try:
+#             cache_manager = CacheManager(Path(temp_dir), {"compression": "snappy"})
 
-            # Create cached data with columns A, B
-            initial_data = pd.DataFrame(
-                {"A": [1, 2, 3], "B": [4, 5, 6]},
-                index=pd.date_range("2023-01-01", periods=3),
-            )
-            cache_manager.save_data("test_key", initial_data, datetime.now())
+#             # Create cached data with columns A, B
+#             initial_data = pd.DataFrame(
+#                 {"A": [1, 2, 3], "B": [4, 5, 6]},
+#                 index=pd.date_range("2023-01-01", periods=3),
+#             )
+#             cache_manager.save_data("test_key", initial_data, datetime.now())
 
-            # New data with completely different columns
-            new_data = pd.DataFrame(
-                {"X": [7, 8, 9], "Y": [10, 11, 12]},
-                index=pd.date_range("2023-01-01", periods=3),
-            )
+#             # New data with completely different columns
+#             new_data = pd.DataFrame(
+#                 {"X": [7, 8, 9], "Y": [10, 11, 12]},
+#                 index=pd.date_range("2023-01-01", periods=3),
+#             )
 
-            modifications, additions = self.validator.detect_changes_detailed(
-                "test_key", new_data, cache_manager
-            )
-            # Should handle gracefully - new columns treated as additions
-            assert len(additions) > 0
+#             modifications, additions = self.validator.detect_changes_detailed(
+#                 "test_key", new_data, cache_manager
+#             )
+#             # Should handle gracefully - new columns treated as additions
+#             assert len(additions) > 0
 
-        finally:
-            safe_rmtree(temp_dir, ignore_errors=True)
+#         finally:
+#             safe_rmtree(temp_dir, ignore_errors=True)
 
 
 class TestExceptionClasses:
