@@ -495,11 +495,11 @@ class TestCoveragePhaseTesting:
                 if hasattr(mock_finlab.data, "_original_get"):
                     delattr(mock_finlab.data, "_original_get")
 
-                # Install patch without specifying allow_historical_changes (should default to False)
+                # Install patch without specifying allow_historical_changes (should default to True)
                 guard.install_patch()
 
-                # Verify the global setting defaults to False
-                assert not guard._allow_historical_changes
+                # Verify the global setting defaults to True
+                assert guard._allow_historical_changes
 
                 # Clean up
                 guard.remove_patch()

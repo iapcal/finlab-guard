@@ -1,0 +1,6 @@
+# Git LFS configuration for pickle files
+# All .pkl files should be tracked with Git LFS
+*.pkl filter=lfs diff=lfs merge=lfs -text
+
+# Also track parquet files if we add them later
+*.parquet filter=lfs diff=lfs merge=lfs -text

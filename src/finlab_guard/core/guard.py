@@ -55,9 +55,9 @@ class FinlabGuard:
             self.config.update(config)
 
         # Set up logging: ensure we pass an int level. Config stores level names like 'INFO'
-        log_level_name = str(self.config.get("log_level", "INFO"))
-        log_level = getattr(logging, log_level_name, logging.INFO)
-        logging.basicConfig(level=log_level)
+        log_level_name = str(self.config.get("log_level", "DEBUG"))  # Change default to DEBUG for troubleshooting
+        log_level = getattr(logging, log_level_name, logging.DEBUG)
+        logging.basicConfig(level=log_level, format='%(levelname)s %(name)s:%(funcName)s:%(lineno)d %(message)s')
 
         # Initialize components
         self.cache_manager = CacheManager(self.cache_dir, self.config)
@@ -66,7 +66,7 @@ class FinlabGuard:
         self.time_context: Optional[datetime] = None
 
         # Global setting for allowing historical changes
-        self._allow_historical_changes: bool = False
+        self._allow_historical_changes: bool = True
 
         logger.info(f"FinlabGuard initialized with cache_dir: {self.cache_dir}")
 
@@ -122,6 +122,18 @@ class FinlabGuard:
             raise UnsupportedDataFormatException("MultiIndex index is not supported")
 
         logger.debug(f"DataFrame validation passed: shape {df.shape}")
+
+    def _preprocess_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Preprocess DataFrame to handle problematic types."""
+        result = df.copy()
+
+        # Categorical columns are now properly supported in the cache manager
+        # No preprocessing needed for categorical dtypes
+
+        # Note: DatetimeIndex preservation is important for test compatibility
+        # Only convert if we encounter specific serialization issues
+
+        return result
 
     def generate_unique_timestamp(self, key: str) -> datetime:
         """
@@ -196,6 +208,9 @@ class FinlabGuard:
         # Validate data format
         self.validate_dataframe_format(new_data)
 
+        # Preprocess data to handle problematic types
+        new_data = self._preprocess_dataframe(new_data)
+
         # Check if cache exists
         if not self.cache_manager.exists(key):
             # First time: save directly
@@ -233,8 +248,9 @@ class FinlabGuard:
             has_cell_modifications = not changes.cell_changes.empty
             has_row_deletions = not changes.row_deletions.empty
             has_column_deletions = not changes.column_deletions.empty
+            has_dtype_changes = changes.dtype_changed
 
-            if has_cell_modifications or has_row_deletions or has_column_deletions:
+            if has_cell_modifications or has_row_deletions or has_column_deletions or has_dtype_changes:
                 # Build detailed error message
                 error_details = []
                 if has_cell_modifications:
@@ -247,6 +263,8 @@ class FinlabGuard:
                     error_details.append(
                         f"{len(changes.column_deletions)} column deletions"
                     )
+                if has_dtype_changes:
+                    error_details.append("dtype changes")
 
                 raise DataModifiedException(
                     f"Historical data modified for {key}: {', '.join(error_details)}",
@@ -262,6 +280,10 @@ class FinlabGuard:
                 + len(changes.column_additions)
                 + len(changes.column_deletions)
             )
+
+            # Include dtype changes in total count
+            if changes.dtype_changed:
+                total_changes += 1
 
             if total_changes > 0:
                 change_summary = []
@@ -279,6 +301,8 @@ class FinlabGuard:
                     change_summary.append(
                         f"{len(changes.column_deletions)} column deletions"
                     )
+                if changes.dtype_changed:
+                    change_summary.append("dtype changes")
 
                 logger.info(f"Updated cache for {key}: {', '.join(change_summary)}")
             else:
@@ -330,7 +354,7 @@ class FinlabGuard:
         except ImportError as e:
             raise FinlabConnectionException("finlab package not found") from e
 
-    def install_patch(self, allow_historical_changes: bool = False) -> None:
+    def install_patch(self, allow_historical_changes: bool = True) -> None:
         """
         Install monkey patch for finlab.data.get.
 

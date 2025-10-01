@@ -377,14 +377,12 @@ class TestTimeContextIntegration:
             ),
         ]
 
-        # Save all phases
+        # Save all phases (allow dtype changes as this test is specifically for dtype evolution)
         for i, (phase_time, phase_data) in enumerate(dtype_phases):
             with patch.object(guard, "_now", return_value=phase_time):
                 with self._mock_finlab_data(phase_data):
-                    if i == 2:  # Phase 3 has new column, force download
-                        guard.get(key, allow_historical_changes=True)
-                    else:
-                        guard.get(key)
+                    # Allow historical changes for dtype evolution testing
+                    guard.get(key, allow_historical_changes=True)
 
         # Test dtype consistency at different times
         dtype_tests = [

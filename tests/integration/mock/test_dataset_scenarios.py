@@ -180,7 +180,8 @@ class TestDatasetScenarios:
 
         with patch.object(guard, "_now", return_value=later_time):
             with self._mock_finlab_data(new_data):
-                result2 = guard.get(key)
+                # Allow dtype changes as this scenario tests dtype evolution
+                result2 = guard.get(key, allow_historical_changes=True)
 
         # Verify: get() returns new data with new dtype
         self._verify_data_integrity(new_data, result2)
@@ -304,7 +305,7 @@ class TestDatasetScenarios:
             with self._mock_finlab_data(modified_data):
                 # Verify: get() raises DataModifiedException
                 with pytest.raises(DataModifiedException) as exc_info:
-                    guard.get(key)
+                    guard.get(key, allow_historical_changes=False)
 
                 # Verify: exception contains correct change information
                 exception = exc_info.value
@@ -334,9 +335,20 @@ class TestDatasetScenarios:
                 import json
 
                 # The new value should be 105 (stored as JSON)
-                new_value = json.loads(a_modifications.iloc[0]["value"])
-                # Convert to int for comparison since JSON might return string
-                new_value = int(new_value) if isinstance(new_value, str) else new_value
+                raw_value = a_modifications.iloc[0]["value"]
+
+                # Use the cache manager's JSON parsing method to handle special encodings
+                from finlab_guard.cache.manager import CacheManager
+                cache_manager = CacheManager(guard.cache_dir, guard.config)
+
+                # First parse the JSON, then parse the value with proper handling
+                parsed_json = json.loads(raw_value)
+                new_value = cache_manager._parse_json_value(parsed_json)
+
+                # Convert to int for comparison if it's a whole number
+                if isinstance(new_value, float) and new_value.is_integer():
+                    new_value = int(new_value)
+
                 assert new_value == 105, f"New value should be 105, got {new_value}"
 
         # Verify: time_context can still access original data (not polluted)

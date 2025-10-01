@@ -252,8 +252,10 @@ class TestCacheManagerDeletions:
         )
 
         # Load deletions
+        snapshot_time = timestamp - timedelta(minutes=1)
+        target_time = timestamp + timedelta(minutes=1)
         deleted_rows, deleted_cols = cache_manager._load_deletions(
-            "test_table", timestamp + timedelta(minutes=1)
+            "test_table", snapshot_time, target_time
         )
 
         assert "row2" in deleted_rows
@@ -819,13 +821,13 @@ class TestCacheManagerDeletions:
 
         # Debug reconstruction step by step
         target_time = timestamp5 + timedelta(seconds=30)
-        base5 = cache_manager._load_base_snapshot("col_test", target_time)
-        changes5 = cache_manager._load_and_process_cell_changes("col_test", target_time)
+        base5, snapshot_time = cache_manager._load_base_snapshot("col_test", target_time)
+        changes5 = cache_manager._load_and_process_cell_changes("col_test", snapshot_time, target_time)
         additions5 = cache_manager._load_and_process_row_additions(
-            "col_test", target_time
+            "col_test", snapshot_time, target_time
         )
         deleted_rows5, deleted_cols5 = cache_manager._load_deletions(
-            "col_test", target_time
+            "col_test", snapshot_time, target_time
         )
 
         print(f"DEBUG Reconstruction - Base columns: {list(base5.columns)}")

@@ -90,7 +90,8 @@ class TestDtypeSystemIntegration:
 
         with patch.object(guard, "_now", return_value=phase2_time):
             with self._mock_finlab_data(phase2_data):
-                result2 = guard.get(key)
+                # Allow dtype changes for dtype versioning test
+                result2 = guard.get(key, allow_historical_changes=True)
 
         # Verify phase 2 dtypes
         assert result2["int_col"].dtype == np.dtype("int64")  # Changed
@@ -193,7 +194,8 @@ class TestDtypeSystemIntegration:
         for timestamp, data in times_and_data:
             with patch.object(guard, "_now", return_value=timestamp):
                 with self._mock_finlab_data(data):
-                    guard.get(key)
+                    # Allow dtype changes for dtype evolution testing
+                    guard.get(key, allow_historical_changes=True)
 
         # Test precise time queries
         test_cases = [
@@ -320,7 +322,8 @@ class TestDtypeSystemIntegration:
 
         with patch.object(guard, "_now", return_value=later_time):
             with self._mock_finlab_data(modified_data):
-                result2 = guard.get(key)
+                # Allow dtype changes for column order preservation test
+                result2 = guard.get(key, allow_historical_changes=True)
 
         # Verify new order is preserved
         assert list(result2.columns) == ["z_col", "a_col", "m_col", "b_col"]
@@ -371,7 +374,8 @@ class TestDtypeSystemIntegration:
 
         with patch.object(guard, "_now", return_value=later_time):
             with self._mock_finlab_data(modified_data):
-                result2 = guard.get(key)
+                # Allow dtype changes for index order preservation test
+                result2 = guard.get(key, allow_historical_changes=True)
 
         # Verify new index order is preserved
         assert list(result2.index) == ["gamma", "alpha", "beta", "delta"]
@@ -411,10 +415,8 @@ class TestDtypeSystemIntegration:
 
             with patch.object(guard, "_now", return_value=timestamp):
                 with self._mock_finlab_data(data):
-                    if i == 0:
-                        guard.get(key)  # First time
-                    else:
-                        guard.get(key)  # Dtype changes should not trigger exceptions
+                    # Allow dtype changes for dtype history testing
+                    guard.get(key, allow_historical_changes=True)
 
         # Verify dtype history contains all changes
         dtype_history = guard.cache_manager._load_dtype_mapping(key)

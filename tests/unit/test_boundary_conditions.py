@@ -184,6 +184,48 @@ class TestDataTypeBoundaries:
             result = self.guard.get("special_str_key")
             pd.testing.assert_frame_equal(result, special_str_df)
 
+    def test_categorical_dtype_handling(self):
+        """Test handling of categorical dtype columns."""
+        # Create DataFrame with categorical column
+        categorical_df = pd.DataFrame(
+            {
+                "stock_id": pd.Categorical(["1101", "1102", "1103", "1104"]),
+                "name": ["Stock A", "Stock B", "Stock C", "Stock D"],
+                "value": [100.0, 200.0, 300.0, 400.0],
+            },
+            index=pd.date_range("2023-01-01", periods=4),
+        )
+
+        # Store initial categorical data
+        with patch.object(
+            self.guard, "_fetch_from_finlab", return_value=categorical_df
+        ):
+            result1 = self.guard.get("categorical_key")
+            assert result1.shape == categorical_df.shape
+            # Verify data is preserved (dtype may be converted to object)
+            assert result1["name"].tolist() == categorical_df["name"].tolist()
+            assert result1["value"].tolist() == categorical_df["value"].tolist()
+
+        # Test modification with new categorical value
+        modified_df = pd.concat(
+            [
+                categorical_df,
+                pd.DataFrame(
+                    {
+                        "stock_id": ["1105"],
+                        "name": ["Stock E"],
+                        "value": [500.0],
+                    },
+                    index=[pd.Timestamp("2023-01-05")],
+                ),
+            ]
+        )
+
+        with patch.object(self.guard, "_fetch_from_finlab", return_value=modified_df):
+            result2 = self.guard.get("categorical_key", allow_historical_changes=True)
+            assert result2.shape == (5, 3)
+            assert "1105" in result2["stock_id"].values
+
 
 class TestTimeBoundaries:
     """Test boundary conditions related to time handling."""
@@ -206,8 +248,9 @@ class TestTimeBoundaries:
             self.guard.get("rapid_key")
 
         # Immediately try to save another version
+        # Allow historical changes as this test is about timestamp uniqueness, not dtype protection
         with patch.object(self.guard, "_fetch_from_finlab", return_value=df2):
-            result = self.guard.get("rapid_key")
+            result = self.guard.get("rapid_key", allow_historical_changes=True)
             pd.testing.assert_frame_equal(result, df2)
 
         # Verify timestamps are unique
@@ -390,14 +433,15 @@ class TestConcurrencyBoundaries:
         )
 
         # Rapid consecutive operations
+        # Allow historical changes as this test is about concurrency, not dtype protection
         with patch.object(self.guard, "_fetch_from_finlab", return_value=df1):
-            self.guard.get("rapid_key")
+            self.guard.get("rapid_key", allow_historical_changes=True)
 
         with patch.object(self.guard, "_fetch_from_finlab", return_value=df2):
-            self.guard.get("rapid_key")
+            self.guard.get("rapid_key", allow_historical_changes=True)
 
         with patch.object(self.guard, "_fetch_from_finlab", return_value=df3):
-            result3 = self.guard.get("rapid_key")
+            result3 = self.guard.get("rapid_key", allow_historical_changes=True)
 
         # Should handle all operations correctly
         pd.testing.assert_frame_equal(result3, df3)

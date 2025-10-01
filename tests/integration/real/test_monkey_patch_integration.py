@@ -400,7 +400,8 @@ class TestMonkeyPatchIntegration:
         with patch.dict(
             "sys.modules", {"finlab": mock_finlab, "finlab.data": mock_data_module}
         ):
-            guard.install_patch()
+            # Install patch with allow_historical_changes=False to test protection
+            guard.install_patch(allow_historical_changes=False)
 
             # First call - should succeed
             result1 = mock_finlab.data.get("test_key")

@@ -60,7 +60,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--tb=short --strict-markers"
+addopts = "--tb=short --strict-markers -n auto"
 markers = [
     "real_finlab: marks tests that require real finlab connection",
     "serial: marks tests that should run serially to avoid state conflicts",

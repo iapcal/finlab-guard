@@ -52,8 +52,8 @@ class TestColumnAdditions:
         import json
 
         col_data = json.loads(col_data_json)
-        # Values are stored as strings in JSON, so we need to convert for comparison
-        expected_data = {"row1": "7", "row2": "8", "row3": "9"}
+        # Values are stored as their native types in JSON (integers as integers)
+        expected_data = {"row1": 7, "row2": 8, "row3": 9}
         assert col_data == expected_data
 
     def test_multiple_column_additions(self, cache_manager):

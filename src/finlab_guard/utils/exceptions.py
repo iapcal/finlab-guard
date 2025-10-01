@@ -39,6 +39,10 @@ class DataModifiedException(Exception):
             assert isinstance(change_result, ChangeResult)  # Type narrowing for mypy
             details = []
 
+            # Add dtype changes (check this first as it's most significant)
+            if hasattr(change_result, "dtype_changed") and change_result.dtype_changed:
+                details.append("Dtype changes detected")
+
             # Add cell changes
             if not change_result.cell_changes.empty:
                 cell_count = len(change_result.cell_changes)
@@ -64,7 +68,7 @@ class DataModifiedException(Exception):
                 row_add_count = len(change_result.row_additions)
                 details.append(f"Row additions: {row_add_count}")
 
-            change_details = "\n".join(details)
+            change_details = "\n".join(details) if details else "No detailed changes available"
         else:
             # Old Change list format (for backward compatibility)
             change_list = self.changes

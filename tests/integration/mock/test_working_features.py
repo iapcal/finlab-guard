@@ -99,7 +99,7 @@ class TestWorkingIntegration:
         # Attempt to get modified data (should raise exception)
         with self._mock_finlab_data(modified_data):
             with pytest.raises(DataModifiedException):
-                guard.get("modification_test")
+                guard.get("modification_test", allow_historical_changes=False)
 
         # Force download should work
         with self._mock_finlab_data(modified_data):
