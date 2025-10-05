@@ -990,9 +990,6 @@ class CacheManager:
         # Build row deletions: rows in prev not in cur
         deleted_rows = [k for k in prev_keys if k not in cur_keys_set]
 
-        # Debug logging for row comparison
-        if cur_keys and len(str(cur_keys[0])) != len(cur_keys_str[0]):
-
         row_adds = []
         for r in new_rows:
             # Convert row to dict and ensure JSON serializable types
@@ -2018,8 +2015,7 @@ class CacheManager:
                         if "int" in dtype_str:
                             numeric_col = pd.to_numeric(result[col], errors="coerce")
                             # Check if there are any NaN values that would cause integer conversion to fail
-                            if numeric_col.isna().any():
-                            else:
+                            if not numeric_col.isna().any():
                                 result[col] = numeric_col.astype(dtype_str)
                         elif "float" in dtype_str:
                             try:
