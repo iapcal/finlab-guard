@@ -29,39 +29,25 @@ def _to_json_str(obj: Any) -> str:
 
         # Handle numpy types with precision preservation
         if isinstance(o, np.integer):
-            # Convert numpy integer to Python int, preserving precision
-            int_value = int(o)
-            logger.debug(f"🔍 JSON DEBUG: Converting numpy integer {o} ({type(o)}) -> {int_value}")
-            return int_value
+            return int(o)
         elif isinstance(o, np.floating):
-            # Use repr() to preserve full precision, then wrap in special marker
-            float_value = float(o)
-            logger.debug(f"🔍 JSON DEBUG: Converting numpy float {o} ({type(o)}) -> {float_value}")
-            return f"__HIGHPREC_FLOAT__{repr(float_value)}__"
+            return f"__HIGHPREC_FLOAT__{repr(float(o))}__"
         elif isinstance(o, np.bool_):
             return bool(o)
         elif isinstance(o, np.ndarray):
             return o.tolist()
         # Handle Python native types with precision preservation
         elif isinstance(o, float):
-            # Check for NaN again for Python floats
             if np.isnan(o):
-                logger.debug(f"🔍 JSON DEBUG: Found Python NaN float: {o}")
                 return None
-            # Use repr() to preserve full precision for Python floats
-            logger.debug(f"🔍 JSON DEBUG: Converting Python float {o} -> __HIGHPREC_FLOAT__")
             return f"__HIGHPREC_FLOAT__{repr(o)}__"
         elif isinstance(o, int):
-            # Large integers should be preserved exactly
-            logger.debug(f"🔍 JSON DEBUG: Converting Python int {o} -> {o}")
             return o
         # Handle pandas types
         elif hasattr(o, 'item'):  # numpy scalar types
             item_value = o.item()
-            logger.debug(f"🔍 JSON DEBUG: Extracted item {item_value} ({type(item_value)}) from {o} ({type(o)})")
             if isinstance(item_value, float):
                 if np.isnan(item_value):
-                    logger.debug(f"🔍 JSON DEBUG: Found NaN in item value: {item_value}")
                     return None
                 return f"__HIGHPREC_FLOAT__{repr(item_value)}__"
             return item_value
@@ -74,7 +60,6 @@ def _to_json_str(obj: Any) -> str:
             return o.isoformat()
         # Fallback to string conversion
         else:
-            logger.debug(f"🔍 JSON DEBUG: Fallback string conversion for {o} ({type(o)})")
             return str(o)
 
     def _has_special_values(obj: Any) -> bool:
@@ -409,7 +394,6 @@ class CacheManager:
                 """,
                 [key, hash_value, timestamp],
             )
-            logger.debug(f"Saved hash for {key}: {hash_value[:8]}...")
         except Exception as e:
             logger.error(f"Failed to save hash for {key}: {e}")
 
@@ -912,7 +896,6 @@ class CacheManager:
                     )
                 else:
                     # Fallback: try float comparison for mixed types
-                    logger.debug(f"🔍 DIFF DEBUG: Basic comparison failed for column {col}, trying numeric conversion")
                     old_numeric = pl.col(old_col).cast(pl.Float64, strict=False)
                     new_numeric = pl.col(new_col).cast(pl.Float64, strict=False)
 
@@ -934,10 +917,8 @@ class CacheManager:
                             )
                             .with_columns(pl.lit(col).alias("col_key"))
                         )
-                        logger.debug(f"🔍 DIFF DEBUG: Numeric comparison succeeded for column {col}")
                     except Exception:
                         # Final fallback to string comparison
-                        logger.debug(f"🔍 DIFF DEBUG: Numeric comparison failed for column {col}, using string comparison")
                         string_mask = (~(pl.col(old_col).is_null() & pl.col(new_col).is_null())) & (
                             pl.col(old_col).cast(pl.Utf8) != pl.col(new_col).cast(pl.Utf8)
                         )
@@ -1010,15 +991,7 @@ class CacheManager:
         deleted_rows = [k for k in prev_keys if k not in cur_keys_set]
 
         # Debug logging for row comparison
-        logger.debug(f"🔍 ROW COMPARISON DEBUG:")
-        logger.debug(f"  prev_keys (first 5): {list(prev_keys)[:5]}")
-        logger.debug(f"  cur_keys_str (first 5): {cur_keys_str[:5]}")
-        logger.debug(f"  cur_keys_set (first 5): {list(cur_keys_set)[:5]}")
-        logger.debug(f"  new_rows: {new_rows}")
-        logger.debug(f"  deleted_rows: {deleted_rows}")
         if cur_keys and len(str(cur_keys[0])) != len(cur_keys_str[0]):
-            logger.debug(f"  STRING MISMATCH: orig='{cur_keys[0]}' str='{cur_keys_str[0]}'")
-        logger.debug(f"  str_to_orig sample: {dict(list(str_to_orig.items())[:3])}")
 
         row_adds = []
         for r in new_rows:
@@ -1168,32 +1141,24 @@ class CacheManager:
 
         Returns pandas.DataFrame (index = row_key strings).
         """
-        logger.debug(f"🔍 RECONSTRUCTION DEBUG: Starting reconstruct_as_of for {table_id} at {target_time}")
 
         base_data, snapshot_time = self._load_base_snapshot(table_id, target_time)
-        logger.debug(f"🔍 RECONSTRUCTION DEBUG: Base data shape: {base_data.shape}, snapshot_time: {snapshot_time}, columns: {list(base_data.columns)}")
 
         cell_changes = self._load_and_process_cell_changes(table_id, snapshot_time, target_time)
-        logger.debug(f"🔍 RECONSTRUCTION DEBUG: Cell changes shape: {cell_changes.shape}, columns: {list(cell_changes.columns)}")
 
         row_additions = self._load_and_process_row_additions(table_id, snapshot_time, target_time)
-        logger.debug(f"🔍 RECONSTRUCTION DEBUG: Row additions shape: {row_additions.shape}, columns: {list(row_additions.columns)}")
 
         column_additions = self._load_and_process_column_additions(
             table_id, snapshot_time, target_time
         )
-        logger.debug(f"🔍 RECONSTRUCTION DEBUG: Column additions keys: {list(column_additions.keys())}")
 
         deleted_rows, deleted_cols = self._load_deletions(table_id, snapshot_time, target_time)
-        logger.debug(f"🔍 RECONSTRUCTION DEBUG: Deleted rows: {len(deleted_rows) if deleted_rows else 0}, deleted cols: {len(deleted_cols) if deleted_cols else 0}")
 
         merged_data = self._merge_data_layers(
             base_data, cell_changes, row_additions, column_additions
         )
-        logger.debug(f"🔍 RECONSTRUCTION DEBUG: Merged data shape: {merged_data.shape}, columns: {list(merged_data.columns)}")
 
         result = self._finalize_dataframe(merged_data, deleted_rows, deleted_cols)
-        logger.debug(f"🔍 RECONSTRUCTION DEBUG: Final result shape: {result.shape}, columns: {list(result.columns)}")
 
         if result.empty:
             logger.warning(f"No cache data found for {table_id}")
@@ -1241,7 +1206,6 @@ class CacheManager:
                         pl.col("row_key").cast(pl.Utf8)
                     )
                 except Exception as e:
-                    logger.debug(f"Polars conversion failed for base: {e}, converting to string")
                     # Convert object columns to string to avoid type inference issues
                     base_wide_pdf_str = base_wide_pdf.copy()
                     for col in base_wide_pdf_str.columns:
@@ -1291,7 +1255,6 @@ class CacheManager:
                 try:
                     changes_pl = pl.from_pandas(changes_pdf, nan_to_null=False)
                 except Exception as e:
-                    logger.debug(f"Polars conversion failed for changes: {e}, converting to string")
                     # Convert object columns to string to avoid type inference issues
                     changes_pdf_str = changes_pdf.copy()
                     for col in changes_pdf_str.columns:
@@ -1400,10 +1363,8 @@ class CacheManager:
             try:
                 int_str = s[7:-2]  # Remove "__INT__" and trailing "__"
                 result = int(int_str)
-                logger.debug(f"🔍 MARKER: Parsed integer '{s}' -> {result}")
                 return result
             except (ValueError, TypeError) as e:
-                logger.debug(f"🔍 MARKER: Failed to parse integer '{s}': {e}")
                 return None
 
         # Check for boolean markers: __BOOL__True__ or __BOOL__False__
@@ -1416,10 +1377,8 @@ class CacheManager:
                     result = False
                 else:
                     raise ValueError(f"Invalid boolean value: {bool_str}")
-                logger.debug(f"🔍 MARKER: Parsed boolean '{s}' -> {result}")
                 return result
             except (ValueError, TypeError) as e:
-                logger.debug(f"🔍 MARKER: Failed to parse boolean '{s}': {e}")
                 return None
 
         # Check for float markers: __FLOAT__1.5__ or __HIGHPREC_FLOAT__1.5__ (legacy)
@@ -1430,10 +1389,8 @@ class CacheManager:
                 else:  # __HIGHPREC_FLOAT__ (legacy support)
                     float_repr = s[18:-2]  # Remove "__HIGHPREC_FLOAT__" and trailing "__"
                 result = float(float_repr)
-                logger.debug(f"🔍 MARKER: Parsed float '{s}' -> {result}")
                 return result
             except (ValueError, TypeError) as e:
-                logger.debug(f"🔍 MARKER: Failed to parse float '{s}': {e}")
                 return None
 
         # No marker found
@@ -1450,15 +1407,12 @@ class CacheManager:
         """
         # Fast path: primitive types
         if x is None:
-            logger.debug(f"🔍 PARSE: Input is None")
             return None
         if isinstance(x, (int, float, bool)):
-            logger.debug(f"🔍 PARSE: Primitive {type(x).__name__}: {x}")
             return x
 
         # String parsing
         if isinstance(x, str):
-            logger.debug(f"🔍 PARSE: String (len={len(x)}): '{x[:50]}{'...' if len(x) > 50 else ''}'")
 
             # Check for direct marker strings first (before JSON parsing)
             marker_result = self._parse_marker_string(x)
@@ -1468,7 +1422,6 @@ class CacheManager:
             # Try JSON parsing (for JSON-encoded strings)
             try:
                 parsed = orjson.loads(x) if x else None
-                logger.debug(f"🔍 PARSE: orjson.loads() -> {type(parsed).__name__}: {parsed}")
 
                 # If parsed result is a string, check for markers
                 if isinstance(parsed, str):
@@ -1480,12 +1433,10 @@ class CacheManager:
                 return parsed
 
             except Exception as e:
-                logger.debug(f"🔍 PARSE: orjson failed ({type(e).__name__}), returning as-is")
                 # No type guessing - return the original string
                 return x
 
         # Non-string, non-primitive types
-        logger.debug(f"🔍 PARSE: Unknown type {type(x).__name__}, returning as-is")
         return x
 
     def _load_and_process_row_additions(
@@ -1526,7 +1477,6 @@ class CacheManager:
                         pl.col("row_key").cast(pl.Utf8)
                     )
                 except Exception as e:
-                    logger.debug(f"Polars conversion failed for additions: {e}, converting to string")
                     # Convert object columns to string to avoid type inference issues
                     adds_wide_pdf_str = adds_wide_pdf.copy()
                     for col in adds_wide_pdf_str.columns:
@@ -1657,29 +1607,22 @@ class CacheManager:
 
         New priority order ensures cell changes (precise modifications) always have highest precedence.
         """
-        logger.debug(f"🔍 MERGE DEBUG: Starting merge - base: {base.shape}, changes: {changes.shape}, row_additions: {row_additions.shape}")
 
         # Step 1: Start with base snapshot
         merged = base
-        logger.debug(f"🔍 MERGE DEBUG: Step 1 - base: {merged.shape}")
 
         # Step 2: Apply row additions (structural additions)
         if not row_additions.is_empty():
-            logger.debug(f"🔍 MERGE DEBUG: Step 2 - applying row additions")
-            logger.debug(f"🔍 MERGE DEBUG: Row additions data preview (first 3 rows):")
-            logger.debug(f"🔍 MERGE DEBUG: {row_additions.head(3)}")
 
             # Check for duplicate row_keys in row_additions
             row_keys_in_additions = row_additions.select("row_key").to_pandas()["row_key"].tolist()
             unique_row_keys = len(set(row_keys_in_additions))
             total_row_keys = len(row_keys_in_additions)
             if unique_row_keys != total_row_keys:
-                logger.warning(f"🔍 MERGE DEBUG: ⚠️  DUPLICATE ROW KEYS in row_additions! Unique: {unique_row_keys}, Total: {total_row_keys}")
-                logger.debug(f"🔍 MERGE DEBUG: Row keys: {row_keys_in_additions}")
+                logger.warning(f"Duplicate row keys detected in row_additions: {unique_row_keys} unique out of {total_row_keys} total")
 
             merged_before_add = merged.shape
             merged = merged.join(row_additions, on="row_key", how="full", suffix="_add")
-            logger.debug(f"🔍 MERGE DEBUG: After row_additions join: {merged_before_add} -> {merged.shape}")
 
             # Handle row_key from add join
             if "row_key_add" in merged.columns:
@@ -1691,7 +1634,6 @@ class CacheManager:
 
             # Apply add columns (row additions take precedence over base)
             add_cols = [c for c in row_additions.columns if c != "row_key"]
-            logger.debug(f"🔍 MERGE DEBUG: Add columns to process: {add_cols}")
             for c in add_cols:
                 add_col = f"{c}_add"
                 if add_col in merged.columns:
@@ -1708,11 +1650,9 @@ class CacheManager:
             if remaining_adds:
                 merged = merged.drop(remaining_adds)
 
-            logger.debug(f"🔍 MERGE DEBUG: After row_additions processing: {merged.shape}")
 
         # Step 3: Apply column additions (structural additions)
         if column_additions:
-            logger.debug(f"🔍 MERGE DEBUG: Step 3 - applying column additions")
             for col_key, col_data in column_additions.items():
                 if col_data:  # Skip empty column data
                     # Create a temporary dataframe with the new column
@@ -1741,13 +1681,10 @@ class CacheManager:
                             # New column, simple join
                             merged = merged.join(col_df, on="row_key", how="left")
 
-            logger.debug(f"🔍 MERGE DEBUG: After column_additions processing: {merged.shape}")
 
         # Step 4: Apply cell changes (precise modifications) - HIGHEST PRECEDENCE
         if not changes.is_empty():
-            logger.debug(f"🔍 MERGE DEBUG: Step 4 - applying cell changes (highest precedence)")
             merged = merged.join(changes, on="row_key", how="full")
-            logger.debug(f"🔍 MERGE DEBUG: After base+changes join: {merged.shape}, columns: {list(merged.columns)}")
 
             # Handle row_key from joins
             if "row_key_right" in merged.columns:
@@ -1757,7 +1694,6 @@ class CacheManager:
 
             # Apply delta columns from pivot (cell changes override everything)
             delta_cols = [c for c in merged.columns if c.endswith("__delta")]
-            logger.debug(f"🔍 MERGE DEBUG: Delta columns to apply: {delta_cols}")
             for delta_col in delta_cols:
                 target_col = delta_col[: -len("__delta")]
                 if target_col in merged.columns:
@@ -1768,10 +1704,8 @@ class CacheManager:
                         .otherwise(pl.col(target_col))
                         .alias(target_col)
                     )
-                    logger.debug(f"🔍 MERGE DEBUG: Applied delta {delta_col} -> {target_col}")
                 else:
                     merged = merged.rename({delta_col: target_col})
-                    logger.debug(f"🔍 MERGE DEBUG: Renamed {delta_col} -> {target_col} (new column)")
 
             # Drop all remaining __delta columns
             if delta_cols:
@@ -1779,7 +1713,6 @@ class CacheManager:
                 if remaining_deltas:
                     merged = merged.drop(remaining_deltas)
 
-            logger.debug(f"🔍 MERGE DEBUG: After cell changes application: {merged.shape}")
 
         return merged
 
@@ -1947,12 +1880,10 @@ class CacheManager:
                             if mask.all():
                                 # Convert entire column to datetime64
                                 result[col] = result[col].astype(pd.api.types.pandas_dtype('datetime64[ns]'))
-                                logger.debug(f"Pre-converted datetime string to datetime64 for column '{col}'")
                             # elif mask.any():
                             #     # Has "NaN" strings - convert only non-NaN values, keep dtype as object
                             #     datetime_values = result[col][mask].astype(pd.api.types.pandas_dtype('datetime64[ns]'))
                             #     result.loc[mask, col] = datetime_values
-                            #     logger.debug(f"Pre-converted datetime string to datetime64 (mixed with NaN strings) for column '{col}'")
                         except Exception:
                             pass  # Not a datetime string, continue with original logic
 
@@ -1963,12 +1894,10 @@ class CacheManager:
                             numeric_col = pd.to_numeric(result[col], errors="coerce")
                             # Check if there are any NaN values that would cause integer conversion to fail
                             if numeric_col.isna().any():
-                                logger.debug(f"Column '{col}' contains non-numeric values, keeping as object")
                                 # Keep as object if there are unconvertible values
                                 pass
                             else:
                                 result[col] = numeric_col.astype(dtype_str)
-                                logger.debug(f"Successfully converted column '{col}' to {dtype_str}")
                         except (ValueError, TypeError) as e:
                             logger.debug(f"Failed to convert column '{col}' to {dtype_str}: {e}")
                             # Keep original dtype if conversion fails
@@ -2045,7 +1974,6 @@ class CacheManager:
                                 missing_categories = set(unique_values) - set(categories)
 
                                 if missing_categories:
-                                    logger.debug(f"Found values not in original categories for column '{col}': {missing_categories}")
                                     # Extend categories to include missing values
                                     extended_categories = list(categories) + list(missing_categories)
                                     categories = pd.Index(extended_categories)
@@ -2091,17 +2019,14 @@ class CacheManager:
                             numeric_col = pd.to_numeric(result[col], errors="coerce")
                             # Check if there are any NaN values that would cause integer conversion to fail
                             if numeric_col.isna().any():
-                                logger.debug(f"Fallback: Column '{col}' contains non-numeric values, keeping original dtype")
                             else:
                                 result[col] = numeric_col.astype(dtype_str)
-                                logger.debug(f"Fallback conversion successful for column '{col}' to {dtype_str}")
                         elif "float" in dtype_str:
                             try:
                                 result[col] = pd.to_numeric(
                                     result[col], errors="coerce"
                                 ).astype(dtype_str)
                             except (ValueError, TypeError):
-                                logger.debug(f"Fallback: Failed to convert column '{col}' to {dtype_str}")
                                 pass
                         elif "bool" in dtype_str:
                             result[col] = (
@@ -2162,7 +2087,6 @@ class CacheManager:
         if columns_order is not None and set(columns_order) == set(result.columns):
             # Reorder columns to match the saved order
             result = result[columns_order]
-            logger.debug(f"Applied columns order: {columns_order}")
 
         # Apply saved frequency to index (for DatetimeIndex) - do this after reordering
         if (
@@ -2406,7 +2330,6 @@ class CacheManager:
             if dtype_path.exists():
                 dtype_path.unlink()
 
-            logger.debug(f"Cleared cache for key: {key}")
         except Exception as e:
             logger.error(f"Failed to clear cache for {key}: {e}")
 
@@ -2424,7 +2347,6 @@ class CacheManager:
                 for dtype_file in self.cache_dir.glob("*_dtypes.json"):
                     dtype_file.unlink()
 
-            logger.debug("Cleared all cache data")
         except Exception as e:
             logger.error(f"Failed to clear all cache: {e}")
 
