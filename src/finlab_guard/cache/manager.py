@@ -1996,9 +1996,10 @@ class CacheManager:
                         else:
                             # Fallback to simple categorical conversion
                             result[col] = result[col].astype("category")
-                    elif dtype_str == "object":
-                        # Keep as string/object
-                        result[col] = result[col].astype("object")
+                    elif dtype_str == "string" or dtype_str == "object":
+                        # Keep as string
+                        result[col] = result[col].replace("<NA>", pd.NA)
+                        result[col] = result[col].astype(dtype_str)
                     else:
                         # Try direct conversion
                         try:
