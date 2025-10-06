@@ -6,6 +6,7 @@ functionality works correctly in the new mock environment.
 
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,6 +17,20 @@ from finlab_guard import FinlabGuard
 from finlab_guard.utils.exceptions import DataModifiedException
 
 
+def safe_rmtree(path, ignore_errors=False):
+    """Windows-compatible rmtree with retry logic for DuckDB file locking."""
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path, ignore_errors=ignore_errors)
+            break
+        except (PermissionError, OSError):
+            if attempt < 4:
+                time.sleep(0.1)  # Wait 100ms before retry
+                continue
+            if not ignore_errors:
+                raise
+
+
 class TestWorkingIntegration:
     """Test core integration functionality that works reliably."""
 
@@ -24,7 +39,7 @@ class TestWorkingIntegration:
         """Create temporary cache directory for testing."""
         temp_dir = tempfile.mkdtemp()
         yield Path(temp_dir)
-        shutil.rmtree(temp_dir)
+        safe_rmtree(temp_dir)
 
     @pytest.fixture
     def guard(self, temp_cache_dir):
@@ -231,7 +246,7 @@ class TestMockEnvironmentFeatures:
 
             pd.testing.assert_frame_equal(result, test_data)
             guard.close()  # Ensure DuckDB connection is closed before cleanup
-            shutil.rmtree(temp_dir)
+            safe_rmtree(temp_dir)
 
         finally:
             if original_token is not None:

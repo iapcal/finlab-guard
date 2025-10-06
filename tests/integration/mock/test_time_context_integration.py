@@ -9,6 +9,7 @@ This module tests the complete time context system including:
 
 import shutil
 import tempfile
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -20,6 +21,20 @@ import pytest
 from finlab_guard import FinlabGuard
 
 
+def safe_rmtree(path, ignore_errors=False):
+    """Windows-compatible rmtree with retry logic for DuckDB file locking."""
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path, ignore_errors=ignore_errors)
+            break
+        except (PermissionError, OSError):
+            if attempt < 4:
+                time.sleep(0.1)  # Wait 100ms before retry
+                continue
+            if not ignore_errors:
+                raise
+
+
 class TestTimeContextIntegration:
     """Test complete time context functionality."""
 
@@ -28,7 +43,7 @@ class TestTimeContextIntegration:
         """Create temporary cache directory for testing."""
         temp_dir = tempfile.mkdtemp()
         yield Path(temp_dir)
-        shutil.rmtree(temp_dir)
+        safe_rmtree(temp_dir)
 
     @pytest.fixture
     def guard(self, temp_cache_dir):
