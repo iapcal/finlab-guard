@@ -44,7 +44,7 @@ def _to_json_str(obj: Any) -> str:
         elif isinstance(o, int):
             return o
         # Handle pandas types
-        elif hasattr(o, 'item'):  # numpy scalar types
+        elif hasattr(o, "item"):  # numpy scalar types
             item_value = o.item()
             if isinstance(item_value, float):
                 if np.isnan(item_value):
@@ -54,9 +54,9 @@ def _to_json_str(obj: Any) -> str:
         # Enhanced pandas datetime handling
         elif isinstance(o, pd.Timestamp):  # Direct pandas Timestamp handling
             return o.isoformat() if not pd.isna(o) else None
-        elif hasattr(o, 'to_pydatetime'):  # other pandas datetime types
+        elif hasattr(o, "to_pydatetime"):  # other pandas datetime types
             return o.isoformat()
-        elif hasattr(o, 'isoformat'):  # standard datetime objects
+        elif hasattr(o, "isoformat"):  # standard datetime objects
             return o.isoformat()
         # Fallback to string conversion
         else:
@@ -70,7 +70,7 @@ def _to_json_str(obj: Any) -> str:
             return any(_has_special_values(v) for v in obj.values())
         elif isinstance(obj, (list, tuple)):
             return any(_has_special_values(v) for v in obj)
-        elif hasattr(obj, '__array__'):  # numpy arrays/scalars
+        elif hasattr(obj, "__array__"):  # numpy arrays/scalars
             try:
                 result = np.any(np.isinf(obj)) or np.any(np.isnan(obj))
                 return bool(result)
@@ -85,7 +85,8 @@ def _to_json_str(obj: Any) -> str:
     try:
         # Try orjson for better performance on normal values
         import orjson
-        return orjson.dumps(obj, default=_default).decode('utf-8')
+
+        return orjson.dumps(obj, default=_default).decode("utf-8")
     except Exception:
         # Fallback to standard json
         return json.dumps(obj, default=_default, ensure_ascii=False)
@@ -290,12 +291,16 @@ class CacheManager:
                     categorical_metadata[col_str] = {
                         "categories": categories_list,
                         "ordered": ordered,
-                        "categories_dtype": categories_dtype
+                        "categories_dtype": categories_dtype,
                     }
                 except Exception as e:
-                    logger.debug(f"Failed to extract categorical metadata for column '{col}': {e}")
+                    logger.debug(
+                        f"Failed to extract categorical metadata for column '{col}': {e}"
+                    )
                     # Fallback: convert to object dtype to avoid categorical issues
-                    logger.debug(f"Converting column '{col}' from category to object dtype")
+                    logger.debug(
+                        f"Converting column '{col}' from category to object dtype"
+                    )
                     df[col] = df[col].astype(str)
                     dtypes_dict[col_str] = "object"
 
@@ -444,7 +449,7 @@ class CacheManager:
                     categorical_metadata[col_str] = {
                         "categories": cat_col.cat.categories.tolist(),
                         "ordered": cat_col.cat.ordered,
-                        "categories_dtype": str(cat_col.cat.categories.dtype)
+                        "categories_dtype": str(cat_col.cat.categories.dtype),
                     }
                 except Exception:
                     pass
@@ -512,7 +517,8 @@ class CacheManager:
             common_dtypes_changed
             or common_cat_changed
             or latest_entry.get("index_dtype") != current_signature.get("index_dtype")
-            or latest_entry.get("columns_dtype") != current_signature.get("columns_dtype")
+            or latest_entry.get("columns_dtype")
+            != current_signature.get("columns_dtype")
             or latest_entry.get("index_name") != current_signature.get("index_name")
             or latest_entry.get("columns_name") != current_signature.get("columns_name")
             or latest_entry.get("index_freq") != current_signature.get("index_freq")
@@ -554,12 +560,15 @@ class CacheManager:
         # Compare each component including categorical metadata
         changes_detected = (
             latest_entry.get("dtypes") != current_signature.get("dtypes")
-            or latest_entry.get("categorical_metadata", {}) != current_signature.get("categorical_metadata", {})
+            or latest_entry.get("categorical_metadata", {})
+            != current_signature.get("categorical_metadata", {})
             or latest_entry.get("index_dtype") != current_signature.get("index_dtype")
-            or latest_entry.get("columns_dtype") != current_signature.get("columns_dtype")
+            or latest_entry.get("columns_dtype")
+            != current_signature.get("columns_dtype")
             or latest_entry.get("index_name") != current_signature.get("index_name")
             or latest_entry.get("columns_name") != current_signature.get("columns_name")
-            or latest_entry.get("columns_order") != current_signature.get("columns_order")
+            or latest_entry.get("columns_order")
+            != current_signature.get("columns_order")
             or set(latest_entry.get("index_order", []))
             != set(current_signature.get("index_order", []))
             or latest_entry.get("index_freq") != current_signature.get("index_freq")
@@ -799,12 +808,17 @@ class CacheManager:
             """Prepare pandas DataFrame for Polars conversion by handling mixed types."""
             df_copy = df.copy()
             for col in df_copy.columns:
-                if isinstance(df_copy[col].dtype, pd.CategoricalDtype) and col != "__row_key__":
+                if (
+                    isinstance(df_copy[col].dtype, pd.CategoricalDtype)
+                    and col != "__row_key__"
+                ):
                     # convert the category column
                     try:
                         cat_dtype = df_copy[col].dtype
-                        if hasattr(cat_dtype, 'categories'):
-                            df_copy[col] = df_copy[col].astype(cat_dtype.categories.dtype)
+                        if hasattr(cat_dtype, "categories"):
+                            df_copy[col] = df_copy[col].astype(
+                                cat_dtype.categories.dtype
+                            )
                     except (ValueError, TypeError):
                         pass
             return df_copy
@@ -813,15 +827,17 @@ class CacheManager:
             p_prev = pl.from_pandas(_prepare_for_polars(prev_pdf), nan_to_null=False)
             p_cur = pl.from_pandas(_prepare_for_polars(cur_pdf), nan_to_null=False)
         except Exception as e:
-            logger.debug(f"Polars conversion failed: {e}, falling back to string conversion")
+            logger.debug(
+                f"Polars conversion failed: {e}, falling back to string conversion"
+            )
             # More aggressive fallback: convert all non-numeric columns to string
             prev_str = prev_pdf.copy()
             cur_str = cur_pdf.copy()
             for col in prev_str.columns:
-                if prev_str[col].dtype == 'object' and col != "__row_key__":
+                if prev_str[col].dtype == "object" and col != "__row_key__":
                     prev_str[col] = prev_str[col].astype(str)
             for col in cur_str.columns:
-                if cur_str[col].dtype == 'object' and col != "__row_key__":
+                if cur_str[col].dtype == "object" and col != "__row_key__":
                     cur_str[col] = cur_str[col].astype(str)
             p_prev = pl.from_pandas(prev_str, nan_to_null=False)
             p_cur = pl.from_pandas(cur_str, nan_to_null=False)
@@ -856,14 +872,14 @@ class CacheManager:
             try:
                 # First, try direct comparison without forced float conversion
                 # This preserves integer precision and avoids float64 precision loss
-                basic_mask = (~(pl.col(old_col).is_null() & pl.col(new_col).is_null())) & (
-                    pl.col(old_col) != pl.col(new_col)
-                )
+                basic_mask = (
+                    ~(pl.col(old_col).is_null() & pl.col(new_col).is_null())
+                ) & (pl.col(old_col) != pl.col(new_col))
 
                 # Check if this basic comparison can work
                 can_use_basic = True
                 try:
-                    test_comparison = joined.select(basic_mask).limit(1)
+                    joined.select(basic_mask).limit(1)
                 except Exception:
                     can_use_basic = False
 
@@ -872,6 +888,7 @@ class CacheManager:
                     def smart_serialize(x: Any) -> Optional[str]:
                         """Smart serialization that preserves data types with explicit markers."""
                         import numpy as np
+
                         if x is None:
                             return None
                         try:
@@ -888,7 +905,9 @@ class CacheManager:
                         elif isinstance(x, (float, np.floating)):
                             if np.isnan(x):
                                 return None
-                            return f"__FLOAT__{repr(float(x))}__"  # Unified float marker
+                            return (
+                                f"__FLOAT__{repr(float(x))}__"  # Unified float marker
+                            )
                         else:
                             return str(x)  # Strings remain unmarked
 
@@ -898,8 +917,12 @@ class CacheManager:
                             [
                                 pl.col("__row_key__").alias("row_key"),
                                 # Use smart serialization to preserve original data types
-                                pl.col(old_col).map_elements(smart_serialize, return_dtype=pl.Utf8).alias("old"),
-                                pl.col(new_col).map_elements(smart_serialize, return_dtype=pl.Utf8).alias("new"),
+                                pl.col(old_col)
+                                .map_elements(smart_serialize, return_dtype=pl.Utf8)
+                                .alias("old"),
+                                pl.col(new_col)
+                                .map_elements(smart_serialize, return_dtype=pl.Utf8)
+                                .alias("new"),
                             ]
                         )
                         .with_columns(pl.lit(col).alias("col_key"))
@@ -911,26 +934,39 @@ class CacheManager:
 
                     # Check if numeric conversion works
                     try:
-                        test_numeric = joined.select(old_numeric, new_numeric).limit(1)
-                        numeric_mask = (~(pl.col(old_col).is_null() & pl.col(new_col).is_null())) & (
-                            old_numeric != new_numeric
-                        )
+                        joined.select(old_numeric, new_numeric).limit(1)
+                        numeric_mask = (
+                            ~(pl.col(old_col).is_null() & pl.col(new_col).is_null())
+                        ) & (old_numeric != new_numeric)
                         df_changed = (
                             joined.filter(numeric_mask)
                             .select(
                                 [
                                     pl.col("__row_key__").alias("row_key"),
                                     # Only use high-precision encoding for actual floats
-                                    old_numeric.map_elements(lambda x: f"__HIGHPREC_FLOAT__{repr(x)}__" if x is not None else None, return_dtype=pl.Utf8).alias("old"),
-                                    new_numeric.map_elements(lambda x: f"__HIGHPREC_FLOAT__{repr(x)}__" if x is not None else None, return_dtype=pl.Utf8).alias("new"),
+                                    old_numeric.map_elements(
+                                        lambda x: f"__HIGHPREC_FLOAT__{repr(x)}__"
+                                        if x is not None
+                                        else None,
+                                        return_dtype=pl.Utf8,
+                                    ).alias("old"),
+                                    new_numeric.map_elements(
+                                        lambda x: f"__HIGHPREC_FLOAT__{repr(x)}__"
+                                        if x is not None
+                                        else None,
+                                        return_dtype=pl.Utf8,
+                                    ).alias("new"),
                                 ]
                             )
                             .with_columns(pl.lit(col).alias("col_key"))
                         )
                     except Exception:
                         # Final fallback to string comparison
-                        string_mask = (~(pl.col(old_col).is_null() & pl.col(new_col).is_null())) & (
-                            pl.col(old_col).cast(pl.Utf8) != pl.col(new_col).cast(pl.Utf8)
+                        string_mask = (
+                            ~(pl.col(old_col).is_null() & pl.col(new_col).is_null())
+                        ) & (
+                            pl.col(old_col).cast(pl.Utf8)
+                            != pl.col(new_col).cast(pl.Utf8)
                         )
                         df_changed = (
                             joined.filter(string_mask)
@@ -943,11 +979,11 @@ class CacheManager:
                             )
                             .with_columns(pl.lit(col).alias("col_key"))
                         )
-            except Exception as e:
+            except Exception:
                 # Fallback to string comparison if numeric comparison fails
-                string_mask = (~(pl.col(old_col).is_null() & pl.col(new_col).is_null())) & (
-                    pl.col(old_col).cast(pl.Utf8) != pl.col(new_col).cast(pl.Utf8)
-                )
+                string_mask = (
+                    ~(pl.col(old_col).is_null() & pl.col(new_col).is_null())
+                ) & (pl.col(old_col).cast(pl.Utf8) != pl.col(new_col).cast(pl.Utf8))
                 df_changed = (
                     joined.filter(string_mask)
                     .select(
@@ -974,23 +1010,26 @@ class CacheManager:
                 .rename("n_changes")
                 .reset_index()
             )
-            big_row_keys = (
-                counts[counts["n_changes"] > row_change_threshold]["row_key"]
-                .tolist()
-            )
-            big_rows: set[str] = set(big_row_keys)  # row_key is already string from _to_pdf_with_key
+            big_row_keys = counts[counts["n_changes"] > row_change_threshold][
+                "row_key"
+            ].tolist()
+            big_rows: set[str] = set(
+                big_row_keys
+            )  # row_key is already string from _to_pdf_with_key
         else:
             all_changes_pdf = pd.DataFrame(columns=["row_key", "old", "new", "col_key"])
             big_rows = set()
 
         # Build row additions: new rows in cur not in prev
         prev_keys = (
-            set(str(idx) for idx in prev.index)
+            {str(idx) for idx in prev.index}
             if (prev is not None and not prev.empty)
             else set()
         )
         cur_keys = list(cur.index.tolist())  # Keep original types for DataFrame access
-        cur_keys_str = [str(idx) for idx in cur.index]  # String version for comparisons - same format as _to_pdf_with_key
+        cur_keys_str = [
+            str(idx) for idx in cur.index
+        ]  # String version for comparisons - same format as _to_pdf_with_key
         cur_keys_set = set(cur_keys_str)
         # Create mapping from string to original index for DataFrame access
         # Use the same string format as cur_keys_str for consistency
@@ -1011,7 +1050,7 @@ class CacheManager:
             for k, v in row_dict.items():
                 if pd.isna(v):
                     clean_row_dict[k] = None
-                elif hasattr(v, 'item'):  # numpy scalar types
+                elif hasattr(v, "item"):  # numpy scalar types
                     clean_row_dict[k] = v.item()
                 else:
                     clean_row_dict[k] = v
@@ -1031,14 +1070,21 @@ class CacheManager:
                     continue
                 # Handle type conversion for cell values
                 if pd.isna(row["new"]):
-                    newv = None
-                elif hasattr(row["new"], 'item'):  # numpy scalar types  # type: ignore[unreachable]
+                    newv = None  # type: ignore[unreachable]
+                elif hasattr(  # type: ignore[unreachable]
+                    row["new"], "item"
+                ):  # numpy scalar types
                     newv = row["new"].item()
-                elif isinstance(row["new"], str) and row["new"].lower() in {"true", "false"}:  # type: ignore[unreachable]
-                    newv = True if row["new"].lower() == 'true' else False
-                else:  # type: ignore[unreachable]
+                elif isinstance(row["new"], str) and row["new"].lower() in {
+                    "true",
+                    "false",
+                }:
+                    newv = True if row["new"].lower() == "true" else False
+                else:
                     newv = row["new"]  # Already serialized by smart_serialize
-                cell_rows.append((rk, str(ck), _to_json_str(newv), timestamp))  # Don't double-serialize  # type: ignore[unreachable]
+                cell_rows.append(  # type: ignore[unreachable]
+                    (rk, str(ck), _to_json_str(newv), timestamp)
+                )  # Don't double-serialize
 
             # Big rows become partial row maps stored in row_additions
             for br in big_rows:
@@ -1049,7 +1095,7 @@ class CacheManager:
                     col_key_val = r["col_key"]  # type: ignore[index]
                     if pd.isna(new_val):
                         row_map[str(col_key_val)] = None  # type: ignore[unreachable]
-                    elif hasattr(new_val, 'item'):  # numpy scalar types
+                    elif hasattr(new_val, "item"):  # numpy scalar types
                         row_map[str(col_key_val)] = new_val.item()
                     else:
                         row_map[str(col_key_val)] = new_val
@@ -1062,14 +1108,17 @@ class CacheManager:
             for c in new_cols:
                 # Extract the full column data as a dictionary {row_key: value}
                 col_data = {}
-                for r in cur_keys:  # r is now original type, can access DataFrame directly
+                for (
+                    r
+                ) in cur_keys:  # r is now original type, can access DataFrame directly
                     v = cur.at[r, c]
                     # Handle pandas NA/NaN values and ensure JSON serializable types
                     if pd.isna(v):
-                        col_data[str(r)] = None  # Convert to string for storage
-                    else:  # type: ignore[unreachable]
+                        # Convert to string for storage
+                        col_data[str(r)] = None  # type: ignore[unreachable]
+                    else:
                         # Convert to Python native types to avoid JSON serialization issues
-                        if hasattr(v, 'item'):  # numpy scalar types
+                        if hasattr(v, "item"):  # numpy scalar types
                             col_data[str(r)] = v.item()  # Convert to string for storage
                         else:
                             col_data[str(r)] = v  # Convert to string for storage
@@ -1153,15 +1202,21 @@ class CacheManager:
 
         base_data, snapshot_time = self._load_base_snapshot(table_id, target_time)
 
-        cell_changes = self._load_and_process_cell_changes(table_id, snapshot_time, target_time)
+        cell_changes = self._load_and_process_cell_changes(
+            table_id, snapshot_time, target_time
+        )
 
-        row_additions = self._load_and_process_row_additions(table_id, snapshot_time, target_time)
+        row_additions = self._load_and_process_row_additions(
+            table_id, snapshot_time, target_time
+        )
 
         column_additions = self._load_and_process_column_additions(
             table_id, snapshot_time, target_time
         )
 
-        deleted_rows, deleted_cols = self._load_deletions(table_id, snapshot_time, target_time)
+        deleted_rows, deleted_cols = self._load_deletions(
+            table_id, snapshot_time, target_time
+        )
 
         merged_data = self._merge_data_layers(
             base_data, cell_changes, row_additions, column_additions
@@ -1177,7 +1232,9 @@ class CacheManager:
 
         return result
 
-    def _load_base_snapshot(self, table_id: str, target_time: datetime) -> tuple[pl.DataFrame, datetime]:
+    def _load_base_snapshot(
+        self, table_id: str, target_time: datetime
+    ) -> tuple[pl.DataFrame, datetime]:
         """
         Load latest snapshot row_data for the table as Polars DataFrame.
 
@@ -1190,7 +1247,11 @@ class CacheManager:
         WHERE table_id = '{table_id}' AND snapshot_time <= TIMESTAMP '{target_time.isoformat()}'
         """
         snap_time_result = self.conn.execute(q_snap_time).fetchone()
-        snapshot_time = snap_time_result[0] if snap_time_result and snap_time_result[0] else target_time
+        snapshot_time = (
+            snap_time_result[0]
+            if snap_time_result and snap_time_result[0]
+            else target_time
+        )
 
         # Now get the snapshot data
         q_snap = f"""
@@ -1211,18 +1272,21 @@ class CacheManager:
             if not base_wide_pdf.empty:
                 base_wide_pdf["row_key"] = row_keys
                 try:
-                    base_pl = pl.from_pandas(base_wide_pdf, nan_to_null=False).with_columns(
-                        pl.col("row_key").cast(pl.Utf8)
-                    )
-                except Exception as e:
+                    base_pl = pl.from_pandas(
+                        base_wide_pdf, nan_to_null=False
+                    ).with_columns(pl.col("row_key").cast(pl.Utf8))
+                except Exception:
                     # Convert object columns to string to avoid type inference issues
                     base_wide_pdf_str = base_wide_pdf.copy()
                     for col in base_wide_pdf_str.columns:
-                        if base_wide_pdf_str[col].dtype == 'object' and col != "row_key":
+                        if (
+                            base_wide_pdf_str[col].dtype == "object"
+                            and col != "row_key"
+                        ):
                             base_wide_pdf_str[col] = base_wide_pdf_str[col].astype(str)
-                    base_pl = pl.from_pandas(base_wide_pdf_str, nan_to_null=False).with_columns(
-                        pl.col("row_key").cast(pl.Utf8)
-                    )
+                    base_pl = pl.from_pandas(
+                        base_wide_pdf_str, nan_to_null=False
+                    ).with_columns(pl.col("row_key").cast(pl.Utf8))
             else:
                 base_pl = pl.DataFrame({"row_key": pl.Series(row_keys, dtype=pl.Utf8)})
         else:
@@ -1263,11 +1327,11 @@ class CacheManager:
             if not changes_pdf.empty:
                 try:
                     changes_pl = pl.from_pandas(changes_pdf, nan_to_null=False)
-                except Exception as e:
+                except Exception:
                     # Convert object columns to string to avoid type inference issues
                     changes_pdf_str = changes_pdf.copy()
                     for col in changes_pdf_str.columns:
-                        if changes_pdf_str[col].dtype == 'object':
+                        if changes_pdf_str[col].dtype == "object":
                             changes_pdf_str[col] = changes_pdf_str[col].astype(str)
                     changes_pl = pl.from_pandas(changes_pdf_str, nan_to_null=False)
             else:
@@ -1333,7 +1397,10 @@ class CacheManager:
 
                         # Check if all non-null values are "true" or "false"
                         all_boolean = pivot_pl.select(
-                            pl.col(col_name).filter(non_null_mask).is_in(["true", "false"]).all()
+                            pl.col(col_name)
+                            .filter(non_null_mask)
+                            .is_in(["true", "false"])
+                            .all()
                         ).item()
 
                         if all_boolean:
@@ -1348,7 +1415,9 @@ class CacheManager:
                             )
                     except Exception as e:
                         # If conversion fails, keep as string
-                        logger.debug(f"Boolean conversion failed for column {col_name}: {e}")
+                        logger.debug(
+                            f"Boolean conversion failed for column {col_name}: {e}"
+                        )
                         pass
 
             # Ensure row_key is string type
@@ -1391,12 +1460,16 @@ class CacheManager:
                 return None
 
         # Check for float markers: __FLOAT__1.5__ or __HIGHPREC_FLOAT__1.5__ (legacy)
-        if (s.startswith("__FLOAT__") or s.startswith("__HIGHPREC_FLOAT__")) and s.endswith("__"):
+        if (
+            s.startswith("__FLOAT__") or s.startswith("__HIGHPREC_FLOAT__")
+        ) and s.endswith("__"):
             try:
                 if s.startswith("__FLOAT__"):
                     float_repr = s[9:-2]  # Remove "__FLOAT__" and trailing "__"
                 else:  # __HIGHPREC_FLOAT__ (legacy support)
-                    float_repr = s[18:-2]  # Remove "__HIGHPREC_FLOAT__" and trailing "__"
+                    float_repr = s[
+                        18:-2
+                    ]  # Remove "__HIGHPREC_FLOAT__" and trailing "__"
                 result_float: float = float(float_repr)
                 return result_float
             except (ValueError, TypeError):
@@ -1422,7 +1495,6 @@ class CacheManager:
 
         # String parsing
         if isinstance(x, str):
-
             # Check for direct marker strings first (before JSON parsing)
             marker_result = self._parse_marker_string(x)
             if marker_result is not None:
@@ -1441,7 +1513,7 @@ class CacheManager:
                 # Return parsed value as-is (no type guessing)
                 return parsed
 
-            except Exception as e:
+            except Exception:
                 # No type guessing - return the original string
                 return x
 
@@ -1482,18 +1554,21 @@ class CacheManager:
             if not adds_wide_pdf.empty:
                 adds_wide_pdf["row_key"] = add_row_keys
                 try:
-                    adds_pl = pl.from_pandas(adds_wide_pdf, nan_to_null=False).with_columns(
-                        pl.col("row_key").cast(pl.Utf8)
-                    )
-                except Exception as e:
+                    adds_pl = pl.from_pandas(
+                        adds_wide_pdf, nan_to_null=False
+                    ).with_columns(pl.col("row_key").cast(pl.Utf8))
+                except Exception:
                     # Convert object columns to string to avoid type inference issues
                     adds_wide_pdf_str = adds_wide_pdf.copy()
                     for col in adds_wide_pdf_str.columns:
-                        if adds_wide_pdf_str[col].dtype == 'object' and col != "row_key":
+                        if (
+                            adds_wide_pdf_str[col].dtype == "object"
+                            and col != "row_key"
+                        ):
                             adds_wide_pdf_str[col] = adds_wide_pdf_str[col].astype(str)
-                    adds_pl = pl.from_pandas(adds_wide_pdf_str, nan_to_null=False).with_columns(
-                        pl.col("row_key").cast(pl.Utf8)
-                    )
+                    adds_pl = pl.from_pandas(
+                        adds_wide_pdf_str, nan_to_null=False
+                    ).with_columns(pl.col("row_key").cast(pl.Utf8))
             else:
                 adds_pl = pl.DataFrame(
                     {"row_key": pl.Series(add_row_keys, dtype=pl.Utf8)}
@@ -1622,15 +1697,17 @@ class CacheManager:
 
         # Step 2: Apply row additions (structural additions)
         if not row_additions.is_empty():
-
             # Check for duplicate row_keys in row_additions
-            row_keys_in_additions = row_additions.select("row_key").to_pandas()["row_key"].tolist()
+            row_keys_in_additions = (
+                row_additions.select("row_key").to_pandas()["row_key"].tolist()
+            )
             unique_row_keys = len(set(row_keys_in_additions))
             total_row_keys = len(row_keys_in_additions)
             if unique_row_keys != total_row_keys:
-                logger.warning(f"Duplicate row keys detected in row_additions: {unique_row_keys} unique out of {total_row_keys} total")
+                logger.warning(
+                    f"Duplicate row keys detected in row_additions: {unique_row_keys} unique out of {total_row_keys} total"
+                )
 
-            merged_before_add = merged.shape
             merged = merged.join(row_additions, on="row_key", how="full", suffix="_add")
 
             # Handle row_key from add join
@@ -1659,7 +1736,6 @@ class CacheManager:
             if remaining_adds:
                 merged = merged.drop(remaining_adds)
 
-
         # Step 3: Apply column additions (structural additions)
         if column_additions:
             for col_key, col_data in column_additions.items():
@@ -1673,7 +1749,9 @@ class CacheManager:
 
                     if col_rows:
                         # Create DataFrame with explicit string type to avoid type inference errors
-                        col_df = pl.DataFrame(col_rows, schema={"row_key": pl.Utf8, col_key: pl.Utf8})
+                        col_df = pl.DataFrame(
+                            col_rows, schema={"row_key": pl.Utf8, col_key: pl.Utf8}
+                        )
                         # Join the new column to the existing data
                         if col_key in merged.columns:
                             # Column already exists, merge values
@@ -1684,12 +1762,13 @@ class CacheManager:
                             add_col_name = f"{col_key}_col_add"
                             if add_col_name in merged.columns:
                                 merged = merged.with_columns(
-                                    pl.coalesce(pl.col(add_col_name), pl.col(col_key)).alias(col_key)
+                                    pl.coalesce(
+                                        pl.col(add_col_name), pl.col(col_key)
+                                    ).alias(col_key)
                                 ).drop(add_col_name)
                         else:
                             # New column, simple join
                             merged = merged.join(col_df, on="row_key", how="left")
-
 
         # Step 4: Apply cell changes (precise modifications) - HIGHEST PRECEDENCE
         if not changes.is_empty():
@@ -1698,7 +1777,9 @@ class CacheManager:
             # Handle row_key from joins
             if "row_key_right" in merged.columns:
                 merged = merged.with_columns(
-                    pl.coalesce(pl.col("row_key"), pl.col("row_key_right")).alias("row_key")
+                    pl.coalesce(pl.col("row_key"), pl.col("row_key_right")).alias(
+                        "row_key"
+                    )
                 ).drop("row_key_right")
 
             # Apply delta columns from pivot (cell changes override everything)
@@ -1721,7 +1802,6 @@ class CacheManager:
                 remaining_deltas = [c for c in merged.columns if c.endswith("__delta")]
                 if remaining_deltas:
                     merged = merged.drop(remaining_deltas)
-
 
         return merged
 
@@ -1881,14 +1961,20 @@ class CacheManager:
                 try:
                     # Pre-processing: If column is object type and can be parsed as datetime, convert it first
                     # This prevents "2018-10-01 00:00:00" -> float conversion from producing NaN
-                    if result[col].dtype == 'object':
+                    if result[col].dtype == "object":
                         try:
                             # Filter out "NaN" strings and null values before datetime conversion
-                            mask = (result[col] != "NaN") & (result[col] != "")  & result[col].notna()
+                            mask = (
+                                (result[col] != "NaN")
+                                & (result[col] != "")
+                                & result[col].notna()
+                            )
                             # Only convert if ALL values are valid datetime (no "NaN" strings)
                             if mask.all():
                                 # Convert entire column to datetime64
-                                result[col] = result[col].astype(pd.api.types.pandas_dtype('datetime64[ns]'))
+                                result[col] = result[col].astype(
+                                    pd.api.types.pandas_dtype("datetime64[ns]")
+                                )
                             # elif mask.any():
                             #     # Has "NaN" strings - convert only non-NaN values, keep dtype as object
                             #     datetime_values = result[col][mask].astype(pd.api.types.pandas_dtype('datetime64[ns]'))
@@ -1908,7 +1994,9 @@ class CacheManager:
                             else:
                                 result[col] = numeric_col.astype(dtype_str)
                         except (ValueError, TypeError) as e:
-                            logger.debug(f"Failed to convert column '{col}' to {dtype_str}: {e}")
+                            logger.debug(
+                                f"Failed to convert column '{col}' to {dtype_str}: {e}"
+                            )
                             # Keep original dtype if conversion fails
                     elif "float" in dtype_str:
                         try:
@@ -1916,7 +2004,9 @@ class CacheManager:
                                 result[col], errors="coerce"
                             ).astype(dtype_str)
                         except (ValueError, TypeError) as e:
-                            logger.debug(f"Failed to convert column '{col}' to {dtype_str}: {e}")
+                            logger.debug(
+                                f"Failed to convert column '{col}' to {dtype_str}: {e}"
+                            )
                             # Keep original dtype if conversion fails
                     elif "bool" in dtype_str:
                         # Handle both boolean values and string boolean values
@@ -1943,12 +2033,16 @@ class CacheManager:
                             cat_meta = categorical_metadata[col]
                             categories = cat_meta["categories"]
                             ordered = cat_meta.get("ordered", False)
-                            categories_dtype = cat_meta.get("categories_dtype", "object")
+                            categories_dtype = cat_meta.get(
+                                "categories_dtype", "object"
+                            )
 
                             # Convert categories to proper dtype if specified
                             if categories_dtype != "object":
                                 try:
-                                    categories = pd.Index(categories).astype(categories_dtype)
+                                    categories = pd.Index(categories).astype(
+                                        categories_dtype
+                                    )
                                 except (ValueError, TypeError):
                                     categories = pd.Index(categories)
                             else:
@@ -1961,11 +2055,11 @@ class CacheManager:
                                 series = pd.Series(result[col])
                                 # Remove actual None/NaN and string representations like "nan", "None", ""
                                 mask = (
-                                    series.notna() &
-                                    (series != "") &
-                                    (series != "nan") &
-                                    (series != "None") &
-                                    (series != "NaN")
+                                    series.notna()
+                                    & (series != "")
+                                    & (series != "nan")
+                                    & (series != "None")
+                                    & (series != "NaN")
                                 )
                                 unique_values_raw = series[mask].unique()
 
@@ -1973,36 +2067,46 @@ class CacheManager:
                                     try:
                                         # Convert to same dtype as categories to avoid type mismatch
                                         # e.g., string "1.0" vs float 1.0
-                                        unique_values = pd.Index(unique_values_raw).astype(categories_dtype)
+                                        unique_values = pd.Index(
+                                            unique_values_raw
+                                        ).astype(categories_dtype)
                                     except (ValueError, TypeError):
                                         # If conversion fails, use raw values
                                         unique_values = unique_values_raw
                                 else:
                                     unique_values = unique_values_raw
 
-                                missing_categories = set(unique_values) - set(categories)
+                                missing_categories = set(unique_values) - set(
+                                    categories
+                                )
 
                                 if missing_categories:
                                     # Extend categories to include missing values
-                                    extended_categories = list(categories) + list(missing_categories)
+                                    extended_categories = list(categories) + list(
+                                        missing_categories
+                                    )
                                     categories = pd.Index(extended_categories)
 
                                 # Convert result[col] to match categories dtype before creating Categorical
                                 # This prevents type mismatch (e.g., string "1.0" vs float 1.0)
                                 if categories_dtype != "object":
                                     try:
-                                        result[col] = pd.Series(result[col]).astype(categories_dtype)
+                                        result[col] = pd.Series(result[col]).astype(
+                                            categories_dtype
+                                        )
                                     except (ValueError, TypeError) as e:
-                                        logger.debug(f"Failed to convert column '{col}' to {categories_dtype}: {e}")
+                                        logger.debug(
+                                            f"Failed to convert column '{col}' to {categories_dtype}: {e}"
+                                        )
                                         # Keep as-is if conversion fails
 
                                 result[col] = pd.Categorical(
-                                    result[col],
-                                    categories=categories,
-                                    ordered=ordered
+                                    result[col], categories=categories, ordered=ordered
                                 )
                             except (ValueError, TypeError) as e:
-                                logger.debug(f"Failed to restore categorical for column '{col}': {e}")
+                                logger.debug(
+                                    f"Failed to restore categorical for column '{col}': {e}"
+                                )
                                 # Fallback to simple categorical conversion
                                 result[col] = result[col].astype("category")
                         else:
@@ -2242,7 +2346,9 @@ class CacheManager:
                 ) combined
                 """
                 latest_result = self.conn.execute(q_latest).fetchone()
-                db_latest_time = latest_result[0] if latest_result and latest_result[0] else None
+                db_latest_time = (
+                    latest_result[0] if latest_result and latest_result[0] else None
+                )
 
                 # Also check dtype mapping file for the latest timestamp
                 dtype_mapping = self._load_dtype_mapping(key)
@@ -2252,7 +2358,9 @@ class CacheManager:
                     dtype_history = dtype_mapping["dtype_history"]
                     if dtype_history:
                         last_entry = dtype_history[-1]
-                        dtype_latest_time = datetime.fromisoformat(last_entry["timestamp"])
+                        dtype_latest_time = datetime.fromisoformat(
+                            last_entry["timestamp"]
+                        )
 
                 # Use the maximum of both
                 if db_latest_time and dtype_latest_time:

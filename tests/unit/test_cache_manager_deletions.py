@@ -821,8 +821,12 @@ class TestCacheManagerDeletions:
 
         # Debug reconstruction step by step
         target_time = timestamp5 + timedelta(seconds=30)
-        base5, snapshot_time = cache_manager._load_base_snapshot("col_test", target_time)
-        changes5 = cache_manager._load_and_process_cell_changes("col_test", snapshot_time, target_time)
+        base5, snapshot_time = cache_manager._load_base_snapshot(
+            "col_test", target_time
+        )
+        changes5 = cache_manager._load_and_process_cell_changes(
+            "col_test", snapshot_time, target_time
+        )
         additions5 = cache_manager._load_and_process_row_additions(
             "col_test", snapshot_time, target_time
         )

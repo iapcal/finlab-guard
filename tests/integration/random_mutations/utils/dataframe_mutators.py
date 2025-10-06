@@ -10,7 +10,7 @@ This module provides comprehensive DataFrame mutation capabilities including:
 """
 
 import random
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -21,25 +21,41 @@ class DataFrameMutator:
 
     # Comprehensive dtype mapping for mutations
     NUMERIC_DTYPES = [
-        np.float64, np.float32, np.float16,  # Float precision variations
-        np.int64, np.int32, np.int16, np.int8,  # Integer precision variations
-        np.uint64, np.uint32, np.uint16, np.uint8,  # Unsigned integer variations
+        np.float64,
+        np.float32,
+        np.float16,  # Float precision variations
+        np.int64,
+        np.int32,
+        np.int16,
+        np.int8,  # Integer precision variations
+        np.uint64,
+        np.uint32,
+        np.uint16,
+        np.uint8,  # Unsigned integer variations
     ]
 
     OTHER_DTYPES = [
         np.object_,  # Object/string type
-        np.bool_,    # Boolean type
-        'category',  # Pandas categorical
-        'string',    # Pandas string (nullable)
+        np.bool_,  # Boolean type
+        "category",  # Pandas categorical
+        "string",  # Pandas string (nullable)
     ]
 
     # Extreme values for testing edge cases
     EXTREME_VALUES = [
-        np.nan, np.inf, -np.inf,  # Special float values
-        1e-10, 1e10, -1e10,       # Very small/large numbers
-        0, -1, 1,                 # Simple values
-        2**31-1, -2**31,          # Int32 limits
-        2**63-1, -2**63+1,        # Int64 limits (approximate)
+        np.nan,
+        np.inf,
+        -np.inf,  # Special float values
+        1e-10,
+        1e10,
+        -1e10,  # Very small/large numbers
+        0,
+        -1,
+        1,  # Simple values
+        2**31 - 1,
+        -(2**31),  # Int32 limits
+        2**63 - 1,
+        -(2**63) + 1,  # Int64 limits (approximate)
     ]
 
     def __init__(self, random_seed: Optional[int] = None):
@@ -47,7 +63,9 @@ class DataFrameMutator:
         self.random = random.Random(random_seed)
         self.np_random = np.random.RandomState(random_seed)
 
-    def mutate_cell_values(self, df: pd.DataFrame, n_changes: int = None) -> pd.DataFrame:
+    def mutate_cell_values(
+        self, df: pd.DataFrame, n_changes: int = None
+    ) -> pd.DataFrame:
         """Randomly mutate cell values in the DataFrame.
 
         Args:
@@ -126,7 +144,9 @@ class DataFrameMutator:
 
         return df_copy
 
-    def insert_random_columns(self, df: pd.DataFrame, n_cols: int = None) -> pd.DataFrame:
+    def insert_random_columns(
+        self, df: pd.DataFrame, n_cols: int = None
+    ) -> pd.DataFrame:
         """Insert new columns at random positions.
 
         Args:
@@ -153,10 +173,12 @@ class DataFrameMutator:
             dtype = self.random.choice(self.NUMERIC_DTYPES + [np.object_])
 
             # Convert object dtype to string for consistency
-            value_dtype = 'string' if dtype == np.object_ else dtype
+            value_dtype = "string" if dtype == np.object_ else dtype
 
             # Generate column data
-            col_data = [self._generate_value_for_dtype(value_dtype) for _ in range(len(df_copy))]
+            col_data = [
+                self._generate_value_for_dtype(value_dtype) for _ in range(len(df_copy))
+            ]
 
             # Insert column at specified position
             if insert_pos >= len(df_copy.columns):
@@ -214,31 +236,35 @@ class DataFrameMutator:
         """
         df_copy = df.copy()
 
-        mutation_type = self.random.choice(['rename', 'reorder', 'dtype_change', 'new_values'])
+        mutation_type = self.random.choice(
+            ["rename", "reorder", "dtype_change", "new_values"]
+        )
 
-        if mutation_type == 'rename' and hasattr(df_copy.index, 'name'):
+        if mutation_type == "rename" and hasattr(df_copy.index, "name"):
             # Change index name
             df_copy.index.name = f"mutated_{df_copy.index.name or 'index'}"
 
-        elif mutation_type == 'reorder' and len(df_copy) > 1:
+        elif mutation_type == "reorder" and len(df_copy) > 1:
             # Shuffle index order
             new_order = list(range(len(df_copy)))
             self.random.shuffle(new_order)
             df_copy = df_copy.iloc[new_order]
 
-        elif mutation_type == 'dtype_change':
+        elif mutation_type == "dtype_change":
             try:
                 # Try to change index dtype
                 if pd.api.types.is_numeric_dtype(df_copy.index):
-                    new_dtype = self.random.choice([np.int32, np.int64, np.float32, np.float64])
+                    new_dtype = self.random.choice(
+                        [np.int32, np.int64, np.float32, np.float64]
+                    )
                     df_copy.index = df_copy.index.astype(new_dtype)
                 elif pd.api.types.is_datetime64_any_dtype(df_copy.index):
                     # For datetime index, try different freq or timezone
                     pass  # Keep as is for now
-            except:
+            except Exception:
                 pass  # Keep original if conversion fails
 
-        elif mutation_type == 'new_values':
+        elif mutation_type == "new_values":
             # Generate completely new index values (ensure uniqueness)
             new_index = self._generate_unique_index_values(df_copy.index, len(df_copy))
             df_copy.index = new_index
@@ -261,7 +287,9 @@ class DataFrameMutator:
         if n_rows is None:
             # Delete 10-30% of rows, but at least 1 and leave at least 1 row
             max_deletable = len(df) - 1  # Leave at least 1 row
-            n_rows = min(max_deletable, max(1, int(len(df) * self.random.uniform(0.1, 0.3))))
+            n_rows = min(
+                max_deletable, max(1, int(len(df) * self.random.uniform(0.1, 0.3)))
+            )
 
         # Ensure we don't delete too many rows
         n_rows = min(n_rows, len(df) - 1)
@@ -279,7 +307,9 @@ class DataFrameMutator:
 
         return df_copy
 
-    def delete_random_columns(self, df: pd.DataFrame, n_cols: int = None) -> pd.DataFrame:
+    def delete_random_columns(
+        self, df: pd.DataFrame, n_cols: int = None
+    ) -> pd.DataFrame:
         """Delete random columns from the DataFrame.
 
         Args:
@@ -295,7 +325,10 @@ class DataFrameMutator:
         if n_cols is None:
             # Delete 10-30% of columns, but at least 1 and leave at least 1 column
             max_deletable = len(df.columns) - 1  # Leave at least 1 column
-            n_cols = min(max_deletable, max(1, int(len(df.columns) * self.random.uniform(0.1, 0.3))))
+            n_cols = min(
+                max_deletable,
+                max(1, int(len(df.columns) * self.random.uniform(0.1, 0.3))),
+            )
 
         # Ensure we don't delete too many columns
         n_cols = min(n_cols, len(df.columns) - 1)
@@ -313,7 +346,9 @@ class DataFrameMutator:
 
         return df_copy
 
-    def apply_random_mutations(self, df: pd.DataFrame, n_mutations: int = None) -> pd.DataFrame:
+    def apply_random_mutations(
+        self, df: pd.DataFrame, n_mutations: int = None
+    ) -> pd.DataFrame:
         """Apply a sequence of random mutations to the DataFrame.
 
         Args:
@@ -356,9 +391,9 @@ class DataFrameMutator:
         dtype_str = str(dtype)
 
         # Handle categorical columns with actual categories
-        if 'category' in dtype_str:
+        if "category" in dtype_str:
             # Choose from actual categories, not hardcoded values
-            if hasattr(column, 'cat') and hasattr(column.cat, 'categories'):
+            if hasattr(column, "cat") and hasattr(column.cat, "categories"):
                 categories = column.cat.categories.tolist()
                 if categories:
                     return self.random.choice(categories)
@@ -367,17 +402,17 @@ class DataFrameMutator:
             if existing_values:
                 return self.random.choice(existing_values)
             # Last resort fallback
-            return self.random.choice(['A', 'B', 'C', 'D'])
+            return self.random.choice(["A", "B", "C", "D"])
 
         # Handle object dtype with content inspection
-        elif dtype_str == 'object':
+        elif dtype_str == "object":
             non_null_values = column.dropna()
             if len(non_null_values) > 0:
                 # Check if all non-null values are strings
                 all_strings = all(isinstance(val, str) for val in non_null_values)
                 if all_strings:
                     # Treat as string type
-                    return self._generate_value_for_dtype('string')
+                    return self._generate_value_for_dtype("string")
 
         # For non-categorical columns, use the existing dtype-based method
         return self._generate_value_for_dtype(dtype)
@@ -387,73 +422,87 @@ class DataFrameMutator:
         dtype_str = str(dtype)
 
         # Handle special pandas dtypes
-        if 'category' in dtype_str:
+        if "category" in dtype_str:
             # For categorical dtypes, we need the actual categories
             # This is a fallback - in practice, should use actual categories from the column
-            return self.random.choice(['A', 'B', 'C', 'D'])
-        elif 'string' in dtype_str:
+            return self.random.choice(["A", "B", "C", "D"])
+        elif "string" in dtype_str:
             return f"random_str_{self.random.randint(1, 1000)}"
         elif dtype == np.object_:
             # For object dtype, mix different types but ensure compatibility
-            return self.random.choice([
-                f"str_{self.random.randint(1, 1000)}",
-                # self.random.randint(1, 100),
-                # self.random.uniform(1.0, 100.0),
-                None  # Allow None values in object columns
-            ])
-        elif 'bool' in dtype_str:
+            return self.random.choice(
+                [
+                    f"str_{self.random.randint(1, 1000)}",
+                    # self.random.randint(1, 100),
+                    # self.random.uniform(1.0, 100.0),
+                    None,  # Allow None values in object columns
+                ]
+            )
+        elif "bool" in dtype_str:
             return bool(self.random.choice([True, False]))
-        elif 'datetime' in dtype_str:
-            base_date = pd.Timestamp('2020-01-01')
+        elif "datetime" in dtype_str:
+            base_date = pd.Timestamp("2020-01-01")
             days_offset = self.random.randint(-1000, 1000)
             return base_date + pd.Timedelta(days=days_offset)
 
         # Handle numeric dtypes with precise type casting
         if pd.api.types.is_integer_dtype(dtype):
-            if 'int8' in dtype_str:
+            if "int8" in dtype_str:
                 value = self.random.randint(-128, 127)
                 return np.int8(value)
-            elif 'int16' in dtype_str:
+            elif "int16" in dtype_str:
                 value = self.random.randint(-32768, 32767)
                 return np.int16(value)
-            elif 'int32' in dtype_str:
-                value = self.random.randint(-2**31, 2**31-1)
+            elif "int32" in dtype_str:
+                value = self.random.randint(-(2**31), 2**31 - 1)
                 return np.int32(value)
-            elif 'int64' in dtype_str:
-                value = self.random.randint(-2**20, 2**20)  # Reasonable range
+            elif "int64" in dtype_str:
+                value = self.random.randint(-(2**20), 2**20)  # Reasonable range
                 return np.int64(value)
-            elif 'uint8' in dtype_str:
+            elif "uint8" in dtype_str:
                 value = self.random.randint(0, 255)
                 return np.uint8(value)
-            elif 'uint16' in dtype_str:
+            elif "uint16" in dtype_str:
                 value = self.random.randint(0, 65535)
                 return np.uint16(value)
-            elif 'uint32' in dtype_str:
-                value = self.random.randint(0, 2**32-1)
+            elif "uint32" in dtype_str:
+                value = self.random.randint(0, 2**32 - 1)
                 return np.uint32(value)
-            elif 'uint64' in dtype_str:
+            elif "uint64" in dtype_str:
                 value = self.random.randint(0, 2**20)  # Reasonable range
                 return np.uint64(value)
             else:
                 # Default integer
-                value = self.random.randint(-2**20, 2**20)
+                value = self.random.randint(-(2**20), 2**20)
                 return np.int64(value)
 
         elif pd.api.types.is_float_dtype(dtype):
             # Generate values appropriate for float precision
             if self.random.random() < 0.1:  # 10% chance of extreme value
                 extreme_val = self.random.choice([np.nan, np.inf, -np.inf, 0.0])
-                if 'float16' in dtype_str:
-                    return np.float16(extreme_val) if not np.isnan(extreme_val) and not np.isinf(extreme_val) else extreme_val
-                elif 'float32' in dtype_str:
-                    return np.float32(extreme_val) if not np.isnan(extreme_val) and not np.isinf(extreme_val) else extreme_val
+                if "float16" in dtype_str:
+                    return (
+                        np.float16(extreme_val)
+                        if not np.isnan(extreme_val) and not np.isinf(extreme_val)
+                        else extreme_val
+                    )
+                elif "float32" in dtype_str:
+                    return (
+                        np.float32(extreme_val)
+                        if not np.isnan(extreme_val) and not np.isinf(extreme_val)
+                        else extreme_val
+                    )
                 else:
-                    return np.float64(extreme_val) if not np.isnan(extreme_val) and not np.isinf(extreme_val) else extreme_val
+                    return (
+                        np.float64(extreme_val)
+                        if not np.isnan(extreme_val) and not np.isinf(extreme_val)
+                        else extreme_val
+                    )
             else:
                 value = self.random.uniform(-1000, 1000)
-                if 'float16' in dtype_str:
+                if "float16" in dtype_str:
                     return np.float16(value)
-                elif 'float32' in dtype_str:
+                elif "float32" in dtype_str:
                     return np.float32(value)
                 else:
                     return np.float64(value)
@@ -465,25 +514,27 @@ class DataFrameMutator:
         """Choose a new dtype that's somewhat compatible with current dtype."""
         if pd.api.types.is_numeric_dtype(current_dtype):
             # For numeric, try other numeric types
-            return self.random.choice(self.NUMERIC_DTYPES + ['category', 'string'])
+            return self.random.choice(self.NUMERIC_DTYPES + ["category", "string"])
         elif pd.api.types.is_object_dtype(current_dtype):
             # For object, try string or category
-            return self.random.choice(['category', 'string'])
+            return self.random.choice(["category", "string"])
         else:
             # For others, try object or numeric
-            return self.random.choice([np.float64, 'category'])
+            return self.random.choice([np.float64, "category"])
 
-    def _convert_column_dtype_safely(self, df: pd.DataFrame, col: str, new_dtype) -> bool:
+    def _convert_column_dtype_safely(
+        self, df: pd.DataFrame, col: str, new_dtype
+    ) -> bool:
         """Safely convert column dtype, ensuring entire column consistency.
 
         Returns:
             bool: True if conversion successful, False otherwise
         """
         try:
-            if new_dtype == 'category':
-                df[col] = df[col].astype('category')
-            elif new_dtype == 'string':
-                df[col] = df[col].astype('string')
+            if new_dtype == "category":
+                df[col] = df[col].astype("category")
+            elif new_dtype == "string":
+                df[col] = df[col].astype("string")
             elif pd.api.types.is_numeric_dtype(new_dtype):
                 # For numeric conversions, ensure all values are compatible
                 if pd.api.types.is_numeric_dtype(df[col].dtype):
@@ -491,7 +542,7 @@ class DataFrameMutator:
                     df[col] = df[col].astype(new_dtype)
                 else:
                     # Convert from non-numeric to numeric
-                    df[col] = pd.to_numeric(df[col], errors='coerce').astype(new_dtype)
+                    df[col] = pd.to_numeric(df[col], errors="coerce").astype(new_dtype)
             else:
                 # Generic conversion
                 df[col] = df[col].astype(new_dtype)
@@ -503,19 +554,19 @@ class DataFrameMutator:
         """Get safe fallback dtypes if primary conversion fails."""
         if pd.api.types.is_numeric_dtype(current_dtype):
             # For numeric types, try safer numeric conversions
-            return [np.float64, np.object_, 'string']
+            return [np.float64, np.object_, "string"]
         elif pd.api.types.is_object_dtype(current_dtype):
             # For object types, try string or keep as object
-            return ['string', np.object_]
+            return ["string", np.object_]
         else:
             # For other types, convert to object as safe fallback
-            return [np.object_, 'string']
+            return [np.object_, "string"]
 
     def _generate_index_value(self, current_index):
         """Generate a new index value based on current index type."""
         if pd.api.types.is_datetime64_any_dtype(current_index):
             # For datetime index, generate random timestamp
-            base_date = pd.Timestamp('2020-01-01')
+            base_date = pd.Timestamp("2020-01-01")
             days_offset = self.random.randint(0, 1000)
             return base_date + pd.Timedelta(days=days_offset)
         elif pd.api.types.is_numeric_dtype(current_index):
@@ -559,7 +610,7 @@ class DataFrameMutator:
         # Fallback: if still not enough unique values, generate sequential ones
         if len(result) < n_values:
             if pd.api.types.is_datetime64_any_dtype(current_index):
-                base = pd.Timestamp('2020-01-01')
+                base = pd.Timestamp("2020-01-01")
                 result = [base + pd.Timedelta(hours=i) for i in range(n_values)]
             elif pd.api.types.is_numeric_dtype(current_index):
                 result = list(range(n_values))

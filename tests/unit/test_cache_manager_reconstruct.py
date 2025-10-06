@@ -61,7 +61,9 @@ class TestCacheManagerReconstruct:
     def test_load_base_snapshot_empty(self, cache_manager):
         """Test _load_base_snapshot with no data."""
         target_time = datetime.now()
-        result, snapshot_time = cache_manager._load_base_snapshot("test_table", target_time)
+        result, snapshot_time = cache_manager._load_base_snapshot(
+            "test_table", target_time
+        )
 
         assert isinstance(result, pl.DataFrame)
         assert isinstance(snapshot_time, datetime)
@@ -81,7 +83,9 @@ class TestCacheManagerReconstruct:
 
         # Test loading
         target_time = datetime.now() + timedelta(minutes=1)
-        result, snapshot_time = cache_manager._load_base_snapshot("test_table", target_time)
+        result, snapshot_time = cache_manager._load_base_snapshot(
+            "test_table", target_time
+        )
 
         assert isinstance(result, pl.DataFrame)
         assert isinstance(snapshot_time, datetime)
@@ -94,7 +98,9 @@ class TestCacheManagerReconstruct:
         """Test _load_and_process_cell_changes with no changes."""
         snapshot_time = datetime.now() - timedelta(hours=1)
         target_time = datetime.now()
-        result = cache_manager._load_and_process_cell_changes("test_table", snapshot_time, target_time)
+        result = cache_manager._load_and_process_cell_changes(
+            "test_table", snapshot_time, target_time
+        )
 
         assert isinstance(result, pl.DataFrame)
         assert result.is_empty()
@@ -123,7 +129,9 @@ class TestCacheManagerReconstruct:
         # Test loading changes
         snapshot_time = timestamp1  # Use snapshot time as base
         target_time = timestamp2 + timedelta(minutes=1)
-        result = cache_manager._load_and_process_cell_changes("test_table", snapshot_time, target_time)
+        result = cache_manager._load_and_process_cell_changes(
+            "test_table", snapshot_time, target_time
+        )
 
         assert isinstance(result, pl.DataFrame)
         if not result.is_empty():
@@ -306,7 +314,7 @@ class TestCacheManagerReconstruct:
         snapshot_time = datetime.now() - timedelta(hours=1)
         mock_base.return_value = (
             pl.DataFrame({"row_key": ["row1"], "A": [1], "B": ["x"]}),
-            snapshot_time
+            snapshot_time,
         )
 
         target_time = datetime.now()
@@ -345,7 +353,9 @@ class TestCacheManagerReconstruct:
         # the method handles pivot exceptions gracefully
         snapshot_time = datetime.now() - timedelta(hours=1)
         target_time = datetime.now()
-        result = cache_manager._load_and_process_cell_changes("test_table", snapshot_time, target_time)
+        result = cache_manager._load_and_process_cell_changes(
+            "test_table", snapshot_time, target_time
+        )
 
         # Should not raise exception even with no data
         assert isinstance(result, pl.DataFrame)

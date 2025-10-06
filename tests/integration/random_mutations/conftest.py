@@ -2,15 +2,17 @@
 
 import shutil
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 
 from finlab_guard import FinlabGuard
-from tests.integration.random_mutations.utils.finlab_samplers import FinlabDataSampler
 from tests.integration.random_mutations.utils.dataframe_mutators import DataFrameMutator
-from tests.integration.random_mutations.utils.verification_helpers import AsOfTimeVerifier
+from tests.integration.random_mutations.utils.finlab_samplers import FinlabDataSampler
+from tests.integration.random_mutations.utils.verification_helpers import (
+    AsOfTimeVerifier,
+)
 
 
 @pytest.fixture
@@ -38,7 +40,7 @@ def random_guard(temp_cache_dir: Path) -> Generator[FinlabGuard, None, None]:
         # Ensure cleanup
         try:
             guard.close()
-        except:
+        except Exception:
             pass
 
 

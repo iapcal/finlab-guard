@@ -339,6 +339,7 @@ class TestDatasetScenarios:
 
                 # Use the cache manager's JSON parsing method to handle special encodings
                 from finlab_guard.cache.manager import CacheManager
+
                 cache_manager = CacheManager(guard.cache_dir, guard.config)
 
                 # First parse the JSON, then parse the value with proper handling

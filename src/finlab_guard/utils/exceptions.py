@@ -68,7 +68,9 @@ class DataModifiedException(Exception):
                 row_add_count = len(change_result.row_additions)
                 details.append(f"Row additions: {row_add_count}")
 
-            change_details = "\n".join(details) if details else "No detailed changes available"
+            change_details = (
+                "\n".join(details) if details else "No detailed changes available"
+            )
         else:
             # Old Change list format (for backward compatibility)
             change_list = self.changes

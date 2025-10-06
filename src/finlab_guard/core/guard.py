@@ -55,9 +55,14 @@ class FinlabGuard:
             self.config.update(config)
 
         # Set up logging: ensure we pass an int level. Config stores level names like 'INFO'
-        log_level_name = str(self.config.get("log_level", "DEBUG"))  # Change default to DEBUG for troubleshooting
+        log_level_name = str(
+            self.config.get("log_level", "DEBUG")
+        )  # Change default to DEBUG for troubleshooting
         log_level = getattr(logging, log_level_name, logging.DEBUG)
-        logging.basicConfig(level=log_level, format='%(levelname)s %(name)s:%(funcName)s:%(lineno)d %(message)s')
+        logging.basicConfig(
+            level=log_level,
+            format="%(levelname)s %(name)s:%(funcName)s:%(lineno)d %(message)s",
+        )
 
         # Initialize components
         self.cache_manager = CacheManager(self.cache_dir, self.config)
@@ -250,7 +255,12 @@ class FinlabGuard:
             has_column_deletions = not changes.column_deletions.empty
             has_dtype_changes = changes.dtype_changed
 
-            if has_cell_modifications or has_row_deletions or has_column_deletions or has_dtype_changes:
+            if (
+                has_cell_modifications
+                or has_row_deletions
+                or has_column_deletions
+                or has_dtype_changes
+            ):
                 # Build detailed error message
                 error_details = []
                 if has_cell_modifications:

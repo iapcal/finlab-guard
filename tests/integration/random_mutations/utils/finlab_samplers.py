@@ -7,7 +7,7 @@ from pickle files for comprehensive random testing scenarios.
 import pickle
 import random
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import pandas as pd
 
@@ -15,7 +15,11 @@ import pandas as pd
 class FinlabDataSampler:
     """Samples real finlab DataFrames from pickle files for testing."""
 
-    def __init__(self, pickle_dir: Union[str, Path, None] = None, random_seed: Optional[int] = None):
+    def __init__(
+        self,
+        pickle_dir: Union[str, Path, None] = None,
+        random_seed: Optional[int] = None,
+    ):
         """Initialize sampler with pickle directory and optional random seed.
 
         Args:
@@ -28,7 +32,7 @@ class FinlabDataSampler:
         self.pickle_dir = Path(pickle_dir)
         self.random = random.Random(random_seed)
         self.random_seed = random_seed
-        self._cache: Dict[str, pd.DataFrame] = {}
+        self._cache: dict[str, pd.DataFrame] = {}
 
         # Discover available pickle files
         self.available_files = list(self.pickle_dir.glob("*.pkl"))
@@ -36,7 +40,7 @@ class FinlabDataSampler:
         if not self.available_files:
             raise FileNotFoundError(f"No pickle files found in {pickle_dir}")
 
-    def get_available_datasets(self) -> List[str]:
+    def get_available_datasets(self) -> list[str]:
         """Get list of available dataset names."""
         return [f.stem for f in self.available_files]
 
@@ -58,7 +62,7 @@ class FinlabDataSampler:
             raise FileNotFoundError(f"Dataset {dataset_name}.pkl not found")
 
         try:
-            with open(pickle_file, 'rb') as f:
+            with open(pickle_file, "rb") as f:
                 df = pickle.load(f)
 
             if use_cache:
@@ -66,9 +70,9 @@ class FinlabDataSampler:
 
             return df.copy()
         except Exception as e:
-            raise ValueError(f"Failed to load {dataset_name}.pkl: {e}")
+            raise ValueError(f"Failed to load {dataset_name}.pkl: {e}") from e
 
-    def sample_random_dataset(self) -> Tuple[str, pd.DataFrame]:
+    def sample_random_dataset(self) -> tuple[str, pd.DataFrame]:
         """Sample a random dataset from available pickle files.
 
         Returns:
@@ -78,11 +82,14 @@ class FinlabDataSampler:
         df = self.load_dataset(dataset_name)
         return dataset_name, df
 
-    def sample_subset(self, df: pd.DataFrame,
-                     max_rows: Optional[int] = None,
-                     max_cols: Optional[int] = None,
-                     min_rows: int = 5,
-                     min_cols: int = 2) -> pd.DataFrame:
+    def sample_subset(
+        self,
+        df: pd.DataFrame,
+        max_rows: Optional[int] = None,
+        max_cols: Optional[int] = None,
+        min_rows: int = 5,
+        min_cols: int = 2,
+    ) -> pd.DataFrame:
         """Sample a random subset of the DataFrame for manageable testing.
 
         Args:
@@ -124,7 +131,7 @@ class FinlabDataSampler:
 
         return df_subset
 
-    def create_test_scenarios(self, n_scenarios: int = 10) -> List[Dict]:
+    def create_test_scenarios(self, n_scenarios: int = 10) -> list[dict]:
         """Create multiple test scenarios with different datasets and subsets.
 
         Args:
@@ -147,15 +154,20 @@ class FinlabDataSampler:
             df_subset = self.sample_subset(df, **subset_params)
 
             scenario = {
-                'scenario_id': i,
-                'dataset_name': dataset_name,
-                'scenario_type': scenario_type,
-                'original_shape': df.shape,
-                'subset_shape': df_subset.shape,
-                'dataframe': df_subset,
-                'has_datetime_index': pd.api.types.is_datetime64_any_dtype(df_subset.index),
-                'has_numeric_data': any(pd.api.types.is_numeric_dtype(df_subset[col]) for col in df_subset.columns),
-                'has_missing_values': df_subset.isnull().any().any(),
+                "scenario_id": i,
+                "dataset_name": dataset_name,
+                "scenario_type": scenario_type,
+                "original_shape": df.shape,
+                "subset_shape": df_subset.shape,
+                "dataframe": df_subset,
+                "has_datetime_index": pd.api.types.is_datetime64_any_dtype(
+                    df_subset.index
+                ),
+                "has_numeric_data": any(
+                    pd.api.types.is_numeric_dtype(df_subset[col])
+                    for col in df_subset.columns
+                ),
+                "has_missing_values": df_subset.isnull().any().any(),
             }
 
             scenarios.append(scenario)
@@ -165,52 +177,52 @@ class FinlabDataSampler:
     def _classify_dataset(self, df: pd.DataFrame) -> str:
         """Classify dataset type based on characteristics."""
         if pd.api.types.is_datetime64_any_dtype(df.index) and df.shape[1] > 100:
-            return 'large_timeseries'  # Like close.pkl, monthly_revenue.pkl
+            return "large_timeseries"  # Like close.pkl, monthly_revenue.pkl
         elif pd.api.types.is_datetime64_any_dtype(df.index):
-            return 'small_timeseries'  # Time-indexed but smaller
+            return "small_timeseries"  # Time-indexed but smaller
         elif df.shape[1] > 100:
-            return 'large_tabular'  # Many columns but not time-indexed
-        elif any('date' in str(col).lower() for col in df.columns):
-            return 'date_containing'  # Contains date columns
+            return "large_tabular"  # Many columns but not time-indexed
+        elif any("date" in str(col).lower() for col in df.columns):
+            return "date_containing"  # Contains date columns
         else:
-            return 'simple_tabular'  # Simple rectangular data
+            return "simple_tabular"  # Simple rectangular data
 
-    def _get_subset_params_for_type(self, scenario_type: str) -> Dict:
+    def _get_subset_params_for_type(self, scenario_type: str) -> dict:
         """Get subset parameters based on scenario type."""
         params = {
-            'large_timeseries': {
-                'max_rows': self.random.randint(20, 80),
-                'max_cols': self.random.randint(10, 30),
-                'min_rows': 10,
-                'min_cols': 5
+            "large_timeseries": {
+                "max_rows": self.random.randint(20, 80),
+                "max_cols": self.random.randint(10, 30),
+                "min_rows": 10,
+                "min_cols": 5,
             },
-            'small_timeseries': {
-                'max_rows': self.random.randint(15, 50),
-                'max_cols': self.random.randint(5, 15),
-                'min_rows': 8,
-                'min_cols': 3
+            "small_timeseries": {
+                "max_rows": self.random.randint(15, 50),
+                "max_cols": self.random.randint(5, 15),
+                "min_rows": 8,
+                "min_cols": 3,
             },
-            'large_tabular': {
-                'max_rows': self.random.randint(30, 100),
-                'max_cols': self.random.randint(8, 25),
-                'min_rows': 10,
-                'min_cols': 4
+            "large_tabular": {
+                "max_rows": self.random.randint(30, 100),
+                "max_cols": self.random.randint(8, 25),
+                "min_rows": 10,
+                "min_cols": 4,
             },
-            'date_containing': {
-                'max_rows': self.random.randint(20, 80),
-                'max_cols': None,  # Keep all columns for date analysis
-                'min_rows': 10,
-                'min_cols': 2
+            "date_containing": {
+                "max_rows": self.random.randint(20, 80),
+                "max_cols": None,  # Keep all columns for date analysis
+                "min_rows": 10,
+                "min_cols": 2,
             },
-            'simple_tabular': {
-                'max_rows': self.random.randint(10, 60),
-                'max_cols': None,  # Keep all columns
-                'min_rows': 5,
-                'min_cols': 2
-            }
+            "simple_tabular": {
+                "max_rows": self.random.randint(10, 60),
+                "max_cols": None,  # Keep all columns
+                "min_rows": 5,
+                "min_cols": 2,
+            },
         }
 
-        return params.get(scenario_type, params['simple_tabular'])
+        return params.get(scenario_type, params["simple_tabular"])
 
 
 class TestDataGenerator:
@@ -220,7 +232,9 @@ class TestDataGenerator:
         self.sampler = sampler
         self.random = sampler.random
 
-    def create_mutation_sequence(self, base_df: pd.DataFrame, n_steps: int = 5) -> List[Tuple[str, pd.DataFrame]]:
+    def create_mutation_sequence(
+        self, base_df: pd.DataFrame, n_steps: int = 5
+    ) -> list[tuple[str, pd.DataFrame]]:
         """Create a sequence of DataFrame mutations with dtype consistency.
 
         Args:
@@ -230,7 +244,9 @@ class TestDataGenerator:
         Returns:
             List of (description, mutated_dataframe) tuples representing the sequence
         """
-        from tests.integration.random_mutations.utils.dataframe_mutators import DataFrameMutator
+        from tests.integration.random_mutations.utils.dataframe_mutators import (
+            DataFrameMutator,
+        )
 
         # Initialize mutator with deterministic seed derived from current random state
         # This ensures mutations are reproducible
@@ -239,7 +255,9 @@ class TestDataGenerator:
         # current_state is typically (version, tuple_of_ints, gauss_next)
         # We use the first few integers from the state tuple
         state_tuple = current_state[1]  # Get the integer tuple part
-        mutator_seed = (state_tuple[0] + state_tuple[1]) % (2**31)  # Combine first two integers
+        mutator_seed = (state_tuple[0] + state_tuple[1]) % (
+            2**31
+        )  # Combine first two integers
         mutator = DataFrameMutator(random_seed=mutator_seed)
 
         sequence = [("initial", base_df.copy())]
@@ -254,64 +272,70 @@ class TestDataGenerator:
                     # Apply dtype changes to entire columns
                     n_cols = min(len(current_df.columns), self.random.randint(1, 3))
                     current_df = mutator.mutate_dtypes(current_df, n_columns=n_cols)
-                    description = f"step_{step+1}_dtype_changes_{n_cols}_columns"
+                    description = f"step_{step + 1}_dtype_changes_{n_cols}_columns"
 
                 elif mutation_type == "cell_values":
                     # Apply cell value changes that respect current dtypes
                     n_changes = self.random.randint(1, min(5, current_df.size))
-                    current_df = mutator.mutate_cell_values(current_df, n_changes=n_changes)
-                    description = f"step_{step+1}_cell_values_{n_changes}_changes"
+                    current_df = mutator.mutate_cell_values(
+                        current_df, n_changes=n_changes
+                    )
+                    description = f"step_{step + 1}_cell_values_{n_changes}_changes"
 
                 elif mutation_type == "new_rows":
                     # Add new rows with values matching current dtypes
                     n_rows = self.random.randint(1, 3)
                     current_df = mutator.insert_random_rows(current_df, n_rows=n_rows)
-                    description = f"step_{step+1}_new_rows_{n_rows}_added"
+                    description = f"step_{step + 1}_new_rows_{n_rows}_added"
 
                 elif mutation_type == "new_columns":
                     # Add new columns with consistent dtypes
                     n_cols = self.random.randint(1, 2)
-                    current_df = mutator.insert_random_columns(current_df, n_cols=n_cols)
-                    description = f"step_{step+1}_new_columns_{n_cols}_added"
+                    current_df = mutator.insert_random_columns(
+                        current_df, n_cols=n_cols
+                    )
+                    description = f"step_{step + 1}_new_columns_{n_cols}_added"
 
                 elif mutation_type == "delete_rows":
                     # Delete random rows (conservative approach)
                     n_rows = min(len(current_df) - 1, self.random.randint(1, 2))
                     current_df = mutator.delete_random_rows(current_df, n_rows=n_rows)
-                    description = f"step_{step+1}_delete_rows_{n_rows}_removed"
+                    description = f"step_{step + 1}_delete_rows_{n_rows}_removed"
 
                 elif mutation_type == "delete_columns":
                     # Delete random columns (conservative approach)
                     n_cols = min(len(current_df.columns) - 1, self.random.randint(1, 2))
-                    current_df = mutator.delete_random_columns(current_df, n_cols=n_cols)
-                    description = f"step_{step+1}_delete_columns_{n_cols}_removed"
+                    current_df = mutator.delete_random_columns(
+                        current_df, n_cols=n_cols
+                    )
+                    description = f"step_{step + 1}_delete_columns_{n_cols}_removed"
 
                 elif mutation_type == "index_mutation":
                     # Mutate the index
                     current_df = mutator.mutate_index(current_df)
-                    description = f"step_{step+1}_index_mutation"
+                    description = f"step_{step + 1}_index_mutation"
 
                 else:
                     # Fallback to safe cell value mutation
                     current_df = mutator.mutate_cell_values(current_df, n_changes=1)
-                    description = f"step_{step+1}_fallback_cell_change"
+                    description = f"step_{step + 1}_fallback_cell_change"
 
                 # Add to sequence
                 sequence.append((description, current_df.copy()))
 
-            except Exception as e:
+            except Exception:
                 # If mutation fails, try a safer fallback
                 try:
                     current_df = mutator.mutate_cell_values(current_df, n_changes=1)
-                    description = f"step_{step+1}_exception_fallback"
+                    description = f"step_{step + 1}_exception_fallback"
                     sequence.append((description, current_df.copy()))
-                except:
+                except Exception:
                     # If even fallback fails, skip this step but continue
                     pass
 
         return sequence
 
-    def _create_balanced_mutation_plan(self, n_steps: int) -> List[str]:
+    def _create_balanced_mutation_plan(self, n_steps: int) -> list[str]:
         """Create a conservative mutation plan that maximizes success rate.
 
         Based on empirical testing, this strategy focuses on mutations that
@@ -323,8 +347,16 @@ class TestDataGenerator:
         """
         # Define mutation categories by reliability (based on test results)
         safe_mutations = ["cell_values"]  # 100% reliable
-        moderate_mutations = ["new_columns", "delete_rows", "delete_columns"]  # Moderately reliable
-        risky_mutations = ["new_rows", "index_mutation", "dtype_changes"]  # High failure rate
+        moderate_mutations = [
+            "new_columns",
+            "delete_rows",
+            "delete_columns",
+        ]  # Moderately reliable
+        risky_mutations = [
+            "new_rows",
+            "index_mutation",
+            "dtype_changes",
+        ]  # High failure rate
 
         plan = []
 
@@ -342,20 +374,19 @@ class TestDataGenerator:
                 if step == 1 and n_steps > 3:
                     # Second step: avoid deletions to ensure we have enough data to work with
                     weights = {
-                        "safe": 0.8,        # 80% safe mutations
-                        "moderate_non_delete": 0.15,   # 15% moderate non-delete mutations
-                        "risky": 0.05       # 5% risky mutations
+                        "safe": 0.8,  # 80% safe mutations
+                        "moderate_non_delete": 0.15,  # 15% moderate non-delete mutations
+                        "risky": 0.05,  # 5% risky mutations
                     }
                 else:
                     weights = {
-                        "safe": 0.6,        # 60% safe mutations
-                        "moderate": 0.3,    # 30% moderate mutations (including deletions)
-                        "risky": 0.1        # 10% risky mutations
+                        "safe": 0.6,  # 60% safe mutations
+                        "moderate": 0.3,  # 30% moderate mutations (including deletions)
+                        "risky": 0.1,  # 10% risky mutations
                     }
 
                 category = self.random.choices(
-                    list(weights.keys()),
-                    weights=list(weights.values())
+                    list(weights.keys()), weights=list(weights.values())
                 )[0]
 
                 if category == "safe":

@@ -378,7 +378,7 @@ class TestTimeContextIntegration:
         ]
 
         # Save all phases (allow dtype changes as this test is specifically for dtype evolution)
-        for i, (phase_time, phase_data) in enumerate(dtype_phases):
+        for _i, (phase_time, phase_data) in enumerate(dtype_phases):
             with patch.object(guard, "_now", return_value=phase_time):
                 with self._mock_finlab_data(phase_data):
                     # Allow historical changes for dtype evolution testing
