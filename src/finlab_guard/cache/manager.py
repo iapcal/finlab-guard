@@ -889,13 +889,22 @@ class CacheManager:
                         """Smart serialization that preserves data types with explicit markers."""
                         import numpy as np
 
+                        # Handle None explicitly
                         if x is None:
-                            return None
+                            return "__NONE__"
+
+                        # Check for pandas NA (pd.NA is a special singleton)
                         try:
+                            # pd.NA has type pandas._libs.missing.NAType
                             if pd.isna(x):
-                                return None
+                                # Distinguish between different NA types
+                                x_type = type(x).__name__
+                                if x_type == "NAType":  # pandas pd.NA
+                                    return "__PD_NA__"
+                                # For other NA values, continue to check type
                         except (TypeError, ValueError):
                             pass  # Not a pandas-compatible type
+
                         # Handle boolean first (before int, since bool is subclass of int)
                         if isinstance(x, (bool, np.bool_)):
                             return f"__BOOL__{str(x)}__"  # "__BOOL__True__" or "__BOOL__False__"
@@ -904,7 +913,7 @@ class CacheManager:
                             return f"__INT__{int(x)}__"  # "__INT__1__", "__INT__-42__", etc.
                         elif isinstance(x, (float, np.floating)):
                             if np.isnan(x):
-                                return None
+                                return "__NAN__"  # Explicit NaN marker
                             return (
                                 f"__FLOAT__{repr(float(x))}__"  # Unified float marker
                             )
@@ -1435,6 +1444,16 @@ class CacheManager:
         """
         if not isinstance(s, str):
             return None  # type: ignore[unreachable]
+
+        # Check for special missing value markers
+        if s == "__NONE__":
+            return None
+        if s == "__PD_NA__":
+            return pd.NA  # Return pandas NA singleton
+        if s == "__NAN__":
+            import numpy as np
+
+            return np.nan
 
         # Check for integer markers: __INT__123__
         if s.startswith("__INT__") and s.endswith("__"):

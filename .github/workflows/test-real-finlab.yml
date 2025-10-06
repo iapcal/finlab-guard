@@ -1,0 +1,46 @@
+name: Real Finlab Integration Tests
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  test-real-finlab:
+    name: Test Real Finlab - Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    env:
+      FINLAB_TOKEN: ${{ secrets.FINLAB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - name: Set up Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: uv sync --dev
+
+    - name: Check FINLAB_TOKEN
+      run: |
+        if [ -z "$FINLAB_TOKEN" ]; then
+          echo "FINLAB_TOKEN is not set. Tests may fail."
+          exit 1
+        fi
+        echo "FINLAB_TOKEN is configured"
+      shell: bash
+
+    - name: Run real integration tests
+      run: |
+        uv run pytest tests/integration/real/ -v --tb=short -n auto
