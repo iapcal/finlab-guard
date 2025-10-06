@@ -2,6 +2,7 @@
 
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -13,12 +14,26 @@ from finlab_guard.utils.exceptions import FinlabConnectionException
 pytestmark = pytest.mark.real_finlab
 
 
+def safe_rmtree(path, ignore_errors=False):
+    """Windows-compatible rmtree with retry logic for DuckDB file locking."""
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path, ignore_errors=ignore_errors)
+            break
+        except (PermissionError, OSError):
+            if attempt < 4:
+                time.sleep(0.1)  # Wait 100ms before retry
+                continue
+            if not ignore_errors:
+                raise
+
+
 @pytest.fixture
 def temp_cache_dir():
     """Create temporary cache directory."""
     temp_dir = Path(tempfile.mkdtemp())
     yield str(temp_dir)
-    shutil.rmtree(temp_dir)
+    safe_rmtree(temp_dir)
 
 
 @pytest.fixture
