@@ -19,13 +19,23 @@ from finlab_guard.cache.manager import CacheManager
 
 def safe_rmtree(path, ignore_errors=False):
     """Windows-compatible rmtree with retry logic for DuckDB file locking."""
-    for attempt in range(5):
+    import gc
+    import shutil
+    import time
+
+    # Force garbage collection to release any lingering file handles
+    gc.collect()
+
+    for attempt in range(10):  # Increase retry attempts to 10
         try:
             shutil.rmtree(path, ignore_errors=ignore_errors)
             break
         except (PermissionError, OSError):
-            if attempt < 4:
-                time.sleep(0.1)  # Wait 100ms before retry
+            if attempt < 9:
+                # Exponential backoff: 100ms, 200ms, 400ms, etc.
+                wait_time = 0.1 * (2 ** min(attempt, 4))
+                time.sleep(wait_time)
+                gc.collect()  # Try garbage collection again
                 continue
             if not ignore_errors:
                 raise
