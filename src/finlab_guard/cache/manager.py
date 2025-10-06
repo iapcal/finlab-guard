@@ -11,6 +11,7 @@ import duckdb
 import orjson
 import pandas as pd
 import polars as pl
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -669,28 +670,70 @@ class CacheManager:
 
     # =================== New DuckDB Core Methods ===================
 
-    def save_snapshot(
-        self, table_id: str, df: pd.DataFrame, snapshot_time: Optional[datetime] = None
+    def _insert_snapshot_chunk(
+        self, table_id: str, chunk_df: pd.DataFrame, snapshot_time: datetime
     ) -> None:
-        """Save a complete DataFrame snapshot to DuckDB."""
-        if snapshot_time is None:
-            snapshot_time = datetime.now()
+        """Insert a chunk of DataFrame into rows_base table.
 
-        rows = []
-        for idx, row in df.iterrows():
-            rows.append(
-                (table_id, str(idx), _to_json_str(row.to_dict()), snapshot_time)
-            )
-
-        if not rows:
-            return
+        Helper function to avoid code duplication in save_snapshot.
+        """
+        row_keys = [str(idx) for idx in chunk_df.index]
+        records = chunk_df.to_dict("records")
+        row_data_list = [_to_json_str(record) for record in records]
 
         tmp = pd.DataFrame(
-            rows, columns=["table_id", "row_key", "row_data", "snapshot_time"]
+            {
+                "table_id": table_id,
+                "row_key": row_keys,
+                "row_data": row_data_list,
+                "snapshot_time": snapshot_time,
+            }
         )
+
         self.conn.register("_tmp_snapshot", tmp)
         self.conn.execute("INSERT INTO rows_base SELECT * FROM _tmp_snapshot")
         self.conn.unregister("_tmp_snapshot")
+
+    def save_snapshot(
+        self, table_id: str, df: pd.DataFrame, snapshot_time: Optional[datetime] = None
+    ) -> None:
+        """Save a complete DataFrame snapshot to DuckDB.
+
+        Optimized for large DataFrames by using chunked processing to avoid memory explosion.
+        For DataFrames with >10M cells, processes in chunks with progress tracking.
+        """
+        if snapshot_time is None:
+            snapshot_time = datetime.now()
+
+        if df.empty:
+            return
+
+        total_cells = df.shape[0] * df.shape[1]
+        chunk_size = 10000  # Process 10k rows at a time
+
+        # Detect huge DataFrames and use chunked processing
+        if total_cells > 100_000_000:  # > 100M cells
+            num_rows = len(df)
+            num_chunks = (num_rows + chunk_size - 1) // chunk_size
+
+            logger.info(
+                f"Processing large DataFrame: {num_rows:,} rows × {df.shape[1]} cols = {total_cells:,} cells"
+            )
+            logger.info(
+                f"Using chunked processing: {num_chunks} chunks of {chunk_size} rows"
+            )
+
+            # Process in chunks with progress bar
+            for chunk_idx in tqdm(range(num_chunks), desc="Saving snapshot chunks"):
+                start_idx = chunk_idx * chunk_size
+                end_idx = min(start_idx + chunk_size, num_rows)
+
+                # Extract and insert chunk
+                chunk_df = df.iloc[start_idx:end_idx]
+                self._insert_snapshot_chunk(table_id, chunk_df, snapshot_time)
+        else:
+            # Small/medium DataFrames: process all at once
+            self._insert_snapshot_chunk(table_id, df, snapshot_time)
 
     def save_version(
         self,
@@ -1318,15 +1361,49 @@ class CacheManager:
         Load and process cell changes into pivoted Polars DataFrame.
 
         Only loads changes where snapshot_time < save_time <= target_time.
+
+        IMPORTANT: Filters cell_changes by row and column lifecycles to prevent
+        stale changes from affecting re-added rows/columns.
+
+        Key insight: A cell_change is valid only if it occurred during a time
+        when BOTH its row and column were "alive" (existed and not deleted).
         """
         q_changes_latest = f"""
+        WITH valid_cell_changes AS (
+            SELECT DISTINCT
+                cc.row_key,
+                cc.col_key,
+                cc.value,
+                cc.save_time
+            FROM cell_changes cc
+            WHERE cc.table_id = '{table_id}'
+              AND cc.save_time > TIMESTAMP '{snapshot_time.isoformat()}'
+              AND cc.save_time <= TIMESTAMP '{target_time.isoformat()}'
+
+              -- Row lifecycle check: cell_change is valid if row was NOT deleted
+              -- in the interval (save_time, target_time]
+              AND NOT EXISTS (
+                  SELECT 1 FROM row_deletions rd
+                  WHERE rd.table_id = cc.table_id
+                    AND rd.row_key = cc.row_key
+                    AND rd.delete_time > cc.save_time
+                    AND rd.delete_time <= TIMESTAMP '{target_time.isoformat()}'
+              )
+
+              -- Column lifecycle check: cell_change is valid if column was NOT deleted
+              -- in the interval (save_time, target_time]
+              AND NOT EXISTS (
+                  SELECT 1 FROM column_deletions cd
+                  WHERE cd.table_id = cc.table_id
+                    AND cd.col_key = cc.col_key
+                    AND cd.delete_time > cc.save_time
+                    AND cd.delete_time <= TIMESTAMP '{target_time.isoformat()}'
+              )
+        )
         SELECT row_key, col_key, value FROM (
             SELECT row_key, col_key, value,
                 row_number() OVER (PARTITION BY row_key, col_key ORDER BY save_time DESC) as rn
-            FROM cell_changes
-            WHERE table_id = '{table_id}'
-              AND save_time > TIMESTAMP '{snapshot_time.isoformat()}'
-              AND save_time <= TIMESTAMP '{target_time.isoformat()}'
+            FROM valid_cell_changes
         ) t WHERE rn = 1
         """
 

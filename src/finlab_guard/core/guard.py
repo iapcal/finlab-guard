@@ -214,7 +214,7 @@ class FinlabGuard:
         self.validate_dataframe_format(new_data)
 
         # Preprocess data to handle problematic types
-        new_data = self._preprocess_dataframe(new_data)
+        # new_data = self._preprocess_dataframe(new_data)
 
         # Check if cache exists
         if not self.cache_manager.exists(key):
