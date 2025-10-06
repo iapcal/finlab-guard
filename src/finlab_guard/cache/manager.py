@@ -65,14 +65,15 @@ def _to_json_str(obj: Any) -> str:
     def _has_special_values(obj: Any) -> bool:
         """Check if object contains inf/nan values that orjson can't handle."""
         if isinstance(obj, (int, float)):
-            return np.isinf(obj) or np.isnan(obj)
+            return bool(np.isinf(obj) or np.isnan(obj))
         elif isinstance(obj, dict):
             return any(_has_special_values(v) for v in obj.values())
         elif isinstance(obj, (list, tuple)):
             return any(_has_special_values(v) for v in obj)
         elif hasattr(obj, '__array__'):  # numpy arrays/scalars
             try:
-                return np.any(np.isinf(obj)) or np.any(np.isnan(obj))
+                result = np.any(np.isinf(obj)) or np.any(np.isnan(obj))
+                return bool(result)
             except (TypeError, ValueError):
                 return False
         return False
@@ -482,6 +483,10 @@ class CacheManager:
         latest_dtypes = latest_entry.get("dtypes", {})
         current_dtypes = current_signature.get("dtypes", {})
 
+        # Type assertion for mypy
+        assert isinstance(latest_dtypes, dict)
+        assert isinstance(current_dtypes, dict)
+
         # Find common columns (exclude additions/deletions)
         common_columns = set(latest_dtypes.keys()) & set(current_dtypes.keys())
 
@@ -493,6 +498,9 @@ class CacheManager:
         # Check categorical metadata for common columns
         latest_cat_meta = latest_entry.get("categorical_metadata", {})
         current_cat_meta = current_signature.get("categorical_metadata", {})
+        assert isinstance(latest_cat_meta, dict)
+        assert isinstance(current_cat_meta, dict)
+
         common_cat_changed = any(
             latest_cat_meta.get(col) != current_cat_meta.get(col)
             for col in common_columns
@@ -754,7 +762,7 @@ class CacheManager:
         pdf = df.copy()
         # Use str() for each index value to match save_snapshot format
         # This preserves full timestamp precision: '2023-06-04 00:00:00' instead of '2023-06-04'
-        pdf.index = [str(idx) for idx in pdf.index]
+        pdf.index = pd.Index([str(idx) for idx in pdf.index])
         pdf = pdf.reset_index()
         pdf.columns.values[0] = "__row_key__"
         return pdf
@@ -791,10 +799,12 @@ class CacheManager:
             """Prepare pandas DataFrame for Polars conversion by handling mixed types."""
             df_copy = df.copy()
             for col in df_copy.columns:
-                if df_copy[col].dtype == 'category' and col != "__row_key__":
+                if isinstance(df_copy[col].dtype, pd.CategoricalDtype) and col != "__row_key__":
                     # convert the category column
                     try:
-                        df_copy[col] = df_copy[col].astype(df_copy[col].dtypes.categories.dtype)
+                        cat_dtype = df_copy[col].dtype
+                        if hasattr(cat_dtype, 'categories'):
+                            df_copy[col] = df_copy[col].astype(cat_dtype.categories.dtype)
                     except (ValueError, TypeError):
                         pass
             return df_copy
@@ -859,7 +869,7 @@ class CacheManager:
 
                 if can_use_basic:
                     # Use smart serialization to handle various data types consistently
-                    def smart_serialize(x: Any) -> str:
+                    def smart_serialize(x: Any) -> Optional[str]:
                         """Smart serialization that preserves data types with explicit markers."""
                         import numpy as np
                         if x is None:
@@ -997,7 +1007,7 @@ class CacheManager:
             orig_r = str_to_orig[r]
             row_dict = cur.loc[orig_r].to_dict()
             # Clean up types to avoid JSON serialization issues
-            clean_row_dict = {}
+            clean_row_dict: dict[str, Any] = {}
             for k, v in row_dict.items():
                 if pd.isna(v):
                     clean_row_dict[k] = None
@@ -1022,25 +1032,27 @@ class CacheManager:
                 # Handle type conversion for cell values
                 if pd.isna(row["new"]):
                     newv = None
-                elif hasattr(row["new"], 'item'):  # numpy scalar types
+                elif hasattr(row["new"], 'item'):  # numpy scalar types  # type: ignore[unreachable]
                     newv = row["new"].item()
-                elif row["new"].lower() in {"true", "false"}:
+                elif isinstance(row["new"], str) and row["new"].lower() in {"true", "false"}:  # type: ignore[unreachable]
                     newv = True if row["new"].lower() == 'true' else False
-                else:
+                else:  # type: ignore[unreachable]
                     newv = row["new"]  # Already serialized by smart_serialize
-                cell_rows.append((rk, str(ck), _to_json_str(newv), timestamp))  # Don't double-serialize
+                cell_rows.append((rk, str(ck), _to_json_str(newv), timestamp))  # Don't double-serialize  # type: ignore[unreachable]
 
             # Big rows become partial row maps stored in row_additions
             for br in big_rows:
                 subset = all_changes_pdf[all_changes_pdf["row_key"] == br]
-                row_map = {}
-                for _, r in subset.iterrows():
-                    if pd.isna(r["new"]):
-                        row_map[str(r["col_key"])] = None
-                    elif hasattr(r["new"], 'item'):  # numpy scalar types
-                        row_map[str(r["col_key"])] = r["new"].item()
+                row_map: dict[str, Any] = {}
+                for _, r in subset.iterrows():  # type: ignore[assignment]
+                    new_val = r["new"]  # type: ignore[index]
+                    col_key_val = r["col_key"]  # type: ignore[index]
+                    if pd.isna(new_val):
+                        row_map[str(col_key_val)] = None  # type: ignore[unreachable]
+                    elif hasattr(new_val, 'item'):  # numpy scalar types
+                        row_map[str(col_key_val)] = new_val.item()
                     else:
-                        row_map[str(r["col_key"])] = r["new"]
+                        row_map[str(col_key_val)] = new_val
                 row_adds.append((str(br), _to_json_str(row_map), timestamp))
 
         # New columns: store as column_additions with full column data
@@ -1055,7 +1067,7 @@ class CacheManager:
                     # Handle pandas NA/NaN values and ensure JSON serializable types
                     if pd.isna(v):
                         col_data[str(r)] = None  # Convert to string for storage
-                    else:
+                    else:  # type: ignore[unreachable]
                         # Convert to Python native types to avoid JSON serialization issues
                         if hasattr(v, 'item'):  # numpy scalar types
                             col_data[str(r)] = v.item()  # Convert to string for storage
@@ -1353,15 +1365,15 @@ class CacheManager:
             Parsed value if a valid marker is found, None otherwise.
         """
         if not isinstance(s, str):
-            return None
+            return None  # type: ignore[unreachable]
 
         # Check for integer markers: __INT__123__
         if s.startswith("__INT__") and s.endswith("__"):
             try:
                 int_str = s[7:-2]  # Remove "__INT__" and trailing "__"
-                result = int(int_str)
+                result: int = int(int_str)
                 return result
-            except (ValueError, TypeError) as e:
+            except (ValueError, TypeError):
                 return None
 
         # Check for boolean markers: __BOOL__True__ or __BOOL__False__
@@ -1369,13 +1381,13 @@ class CacheManager:
             try:
                 bool_str = s[8:-2]  # Remove "__BOOL__" and trailing "__"
                 if bool_str == "True":
-                    result = True
+                    result_bool: bool = True
                 elif bool_str == "False":
-                    result = False
+                    result_bool = False
                 else:
                     raise ValueError(f"Invalid boolean value: {bool_str}")
-                return result
-            except (ValueError, TypeError) as e:
+                return result_bool
+            except (ValueError, TypeError):
                 return None
 
         # Check for float markers: __FLOAT__1.5__ or __HIGHPREC_FLOAT__1.5__ (legacy)
@@ -1385,9 +1397,9 @@ class CacheManager:
                     float_repr = s[9:-2]  # Remove "__FLOAT__" and trailing "__"
                 else:  # __HIGHPREC_FLOAT__ (legacy support)
                     float_repr = s[18:-2]  # Remove "__HIGHPREC_FLOAT__" and trailing "__"
-                result = float(float_repr)
-                return result
-            except (ValueError, TypeError) as e:
+                result_float: float = float(float_repr)
+                return result_float
+            except (ValueError, TypeError):
                 return None
 
         # No marker found
