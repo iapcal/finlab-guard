@@ -348,7 +348,7 @@ class CacheManager:
             }
 
         dtype_path = self._get_dtype_path(key)
-        with open(dtype_path, "w") as f:
+        with open(dtype_path, "w", encoding="utf-8") as f:
             # Use enhanced JSON serialization to handle Timestamp objects
             dtype_json_str = _to_json_str(dtype_mapping)
             f.write(dtype_json_str)
@@ -603,7 +603,7 @@ class CacheManager:
             return None
 
         try:
-            with open(dtype_path) as f:
+            with open(dtype_path, encoding="utf-8") as f:
                 loaded_data = json.load(f)
         except Exception as e:
             logger.error(f"Failed to load dtype mapping for {key}: {e}")
