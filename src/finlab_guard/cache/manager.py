@@ -821,6 +821,14 @@ class CacheManager:
                             )
                     except (ValueError, TypeError):
                         pass
+
+                # Handle string dtype: convert pd.NA to "<NA>" string
+                if col != "__row_key__" and pd.api.types.is_string_dtype(df_copy[col]):
+                    try:
+                        # Replace pd.NA with the string "<NA>"
+                        df_copy[col] = df_copy[col].fillna("<NA>")
+                    except (ValueError, TypeError):
+                        pass
             return df_copy
 
         try:
