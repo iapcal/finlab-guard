@@ -76,21 +76,29 @@ from finlab_guard import FinlabGuard
 
 # Set global setting via install_patch
 guard = FinlabGuard()
-guard.install_patch(allow_historical_changes=True)  # Global setting
+guard.install_patch(allow_historical_changes=False)  # Global setting
 
 # Method parameter overrides global setting
-result1 = data.get('price:收盤價', allow_historical_changes=False)  # Uses False (method override)
-result2 = data.get('volume:成交量')  # Uses True (global setting)
+result1 = data.get('price:收盤價', allow_historical_changes=True)  # Uses True (method override)
+result2 = data.get('volume:成交量')  # Uses False (global setting)
 
-# Precedence order: method parameter > global setting > default (False)
+# Precedence order: method parameter > global setting > default (True)
 ```
 
 **Parameter Precedence**:
 1. **Method parameter** (highest priority): `get(dataset, allow_historical_changes=True/False)`
 2. **Global setting**: Set via `install_patch(allow_historical_changes=True/False)`
-3. **Default value** (lowest priority): `False`
+3. **Default value** (lowest priority): `True` - allows historical changes by default
 
 This allows fine-grained control where you can set a global policy but override it for specific datasets when needed.
+
+## What's New in v0.4.0
+
+### 🔧 Breaking Changes
+- **Default `allow_historical_changes` changed to `True`**: Historical data modifications are now allowed by default. Set to `False` if you need strict change detection.
+
+### 🐛 Critical Bug Fixes
+- **Row/column lifecycle filtering**: Fixed stale `cell_changes` incorrectly affecting re-added rows/columns after deletion.
 
 ## Performance
 
