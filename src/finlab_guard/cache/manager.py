@@ -1727,7 +1727,7 @@ class CacheManager:
         """
         row_del_df = self.conn.execute(q_row_del).fetchdf()
         deleted_rows: set[str] = (
-            set(str(x) for x in row_del_df["row_key"].tolist())
+            {str(x) for x in row_del_df["row_key"].tolist()}
             if not row_del_df.empty
             else set()
         )
@@ -1777,7 +1777,7 @@ class CacheManager:
         """
         col_del_df = self.conn.execute(q_col_del).fetchdf()
         deleted_cols: set[str] = (
-            set(str(x) for x in col_del_df["col_key"].tolist())
+            {str(x) for x in col_del_df["col_key"].tolist()}
             if not col_del_df.empty
             else set()
         )
