@@ -94,6 +94,9 @@ class TestDatasetScenarios:
 
     def _verify_data_integrity(self, expected: pd.DataFrame, actual: pd.DataFrame):
         """Verify complete data integrity including dtypes and order."""
+        # Convert FinlabDataFrame to DataFrame for comparison
+        if type(actual).__name__ == "FinlabDataFrame":
+            actual = pd.DataFrame(actual)
         pd.testing.assert_frame_equal(
             expected, actual, check_dtype=True, check_index_type=True
         )

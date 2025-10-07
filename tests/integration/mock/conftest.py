@@ -32,10 +32,20 @@ def mock_finlab_environment():
     # Create comprehensive mock finlab environment
     mock_finlab = MagicMock()
     mock_data_module = MagicMock()
+    mock_dataframe_module = MagicMock()
 
     # Set up the module hierarchy
     mock_finlab.data = mock_data_module
+    mock_finlab.dataframe = mock_dataframe_module
     mock_finlab.__version__ = "1.0.0"
+
+    # Mock FinlabDataFrame as a subclass of pd.DataFrame
+    class MockFinlabDataFrame(pd.DataFrame):
+        """Mock FinlabDataFrame that behaves like pandas DataFrame"""
+
+        pass
+
+    mock_dataframe_module.FinlabDataFrame = MockFinlabDataFrame
 
     # Mock the data.get function with realistic behavior
     def mock_get(key, **kwargs):
@@ -58,6 +68,7 @@ def mock_finlab_environment():
         {
             "finlab": mock_finlab,
             "finlab.data": mock_data_module,
+            "finlab.dataframe": mock_dataframe_module,
         },
     ):
         yield mock_finlab, mock_data_module
