@@ -138,7 +138,7 @@ class CacheManager:
         """Close the DuckDB connection."""
         if hasattr(self, "conn") and self.conn:
             self.conn.close()
-            self.conn = None
+            self.conn = None  # type: ignore[assignment,unused-ignore]
 
     def __del__(self) -> None:
         """Ensure connection is closed when object is destroyed."""
@@ -1726,8 +1726,8 @@ class CacheManager:
         WHERE rn = 1 AND event_type = 'deletion'
         """
         row_del_df = self.conn.execute(q_row_del).fetchdf()
-        deleted_rows = (
-            set(row_del_df["row_key"].astype(str).tolist())
+        deleted_rows: set[str] = (
+            set(str(x) for x in row_del_df["row_key"].tolist())
             if not row_del_df.empty
             else set()
         )
@@ -1776,8 +1776,8 @@ class CacheManager:
         WHERE rn = 1 AND event_type = 'deletion'
         """
         col_del_df = self.conn.execute(q_col_del).fetchdf()
-        deleted_cols = (
-            set(col_del_df["col_key"].astype(str).tolist())
+        deleted_cols: set[str] = (
+            set(str(x) for x in col_del_df["col_key"].tolist())
             if not col_del_df.empty
             else set()
         )
@@ -1938,11 +1938,12 @@ class CacheManager:
         if not col_add_df.empty:
             for _, row in col_add_df.iterrows():
                 col_key = str(row["col_key"])
+                col_data_json_str = str(row["col_data_json"])
                 try:
-                    col_data = orjson.loads(row["col_data_json"])
+                    col_data = orjson.loads(col_data_json_str)
                 except Exception:
                     try:
-                        col_data = json.loads(row["col_data_json"])
+                        col_data = json.loads(col_data_json_str)
                     except Exception:
                         col_data = {}
                 column_data[col_key] = col_data
