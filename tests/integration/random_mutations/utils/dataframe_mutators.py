@@ -126,7 +126,9 @@ class DataFrameMutator:
                 new_row_data[col] = self._generate_value_for_column(df_copy[col], 0)
 
             # Create new row as DataFrame with unique index
-            new_row = pd.DataFrame([new_row_data], index=[new_indices[i]])
+            new_row = pd.DataFrame([new_row_data], index=[new_indices[i]]).astype(
+                df_copy.dtypes
+            )
 
             # Insert row at specified position
             if insert_pos == 0:

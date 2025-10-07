@@ -2065,29 +2065,17 @@ class CacheManager:
                 try:
                     # Pre-processing: If column is object type and can be parsed as datetime, convert it first
                     # This prevents "2018-10-01 00:00:00" -> float conversion from producing NaN
-                    if result[col].dtype == "object":
+                    if result[col].dtype == "object" and dtype_str == "datetime64[ns]":
                         try:
-                            # Filter out "NaN" strings and null values before datetime conversion
-                            mask = (
-                                (result[col] != "NaN")
-                                & (result[col] != "")
-                                & result[col].notna()
+                            # Convert entire column to datetime64
+                            result[col] = result[col].astype(
+                                pd.api.types.pandas_dtype("datetime64[ns]")
                             )
-                            # Only convert if ALL values are valid datetime (no "NaN" strings)
-                            if mask.all():
-                                # Convert entire column to datetime64
-                                result[col] = result[col].astype(
-                                    pd.api.types.pandas_dtype("datetime64[ns]")
-                                )
-                            # elif mask.any():
-                            #     # Has "NaN" strings - convert only non-NaN values, keep dtype as object
-                            #     datetime_values = result[col][mask].astype(pd.api.types.pandas_dtype('datetime64[ns]'))
-                            #     result.loc[mask, col] = datetime_values
                         except Exception:
                             pass  # Not a datetime string, continue with original logic
 
                     # Since values are stored as strings, convert them back
-                    if "int" in dtype_str:
+                    elif "int" in dtype_str:
                         # Convert string values to numeric first, then to target int type
                         try:
                             numeric_col = pd.to_numeric(result[col], errors="coerce")

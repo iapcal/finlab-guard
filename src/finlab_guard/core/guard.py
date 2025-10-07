@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 import pandas as pd
+from finlab.dataframe import FinlabDataFrame
 
 from ..cache.manager import CacheManager
 from ..utils.exceptions import (
@@ -169,7 +170,7 @@ class FinlabGuard:
         save_to_storage: bool = True,
         force_download: bool = False,
         allow_historical_changes: Optional[bool] = None,
-    ) -> pd.DataFrame:
+    ) -> FinlabDataFrame:
         """
         Get data with caching and change detection.
 
@@ -200,7 +201,8 @@ class FinlabGuard:
         # Check if in time context mode (historical query)
         if self.time_context:
             logger.info(f"Loading historical data for {key} as of {self.time_context}")
-            return self.cache_manager.load_data(key, self.time_context)
+            result = self.cache_manager.load_data(key, self.time_context)
+            return FinlabDataFrame(result)
 
         # Get fresh data from finlab (bypass parameters to original API)
         try:
