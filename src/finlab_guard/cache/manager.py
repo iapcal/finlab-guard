@@ -18,38 +18,6 @@ from .codec import DataTypeCodec
 logger = logging.getLogger(__name__)
 
 
-def _to_json_str(obj: Any, dtypes: Optional[dict[str, str]] = None) -> str:
-    """Convert object to JSON string using DataTypeCodec (JSON Schema v2).
-
-    This function now delegates to DataTypeCodec for consistent serialization.
-    Supports both single values and row dictionaries.
-
-    Args:
-        obj: Value or dict to serialize
-        dtypes: Optional dtype mapping for row dict (column_name -> dtype string)
-
-    Returns:
-        JSON string in Schema v2 format
-
-    Note:
-        - For dict objects: Uses encode_row() to serialize entire row
-        - For single values: Uses encode() for individual value
-        - Minimal fallbacks (< 3), all documented in DataTypeCodec
-    """
-    codec = DataTypeCodec()
-
-    if isinstance(obj, dict):
-        # Serialize entire row (dict of column -> value)
-        return codec.encode_row(obj, dtypes=dtypes)
-    else:
-        # Serialize single value
-        # Extract dtype if available from dtypes dict
-        dtype = None
-        if dtypes and len(dtypes) == 1:
-            dtype = list(dtypes.values())[0]
-        return codec.encode(obj, dtype=dtype)
-
-
 @dataclass
 class ChangeResult:
     """Result of diff computation between two DataFrames."""
@@ -644,7 +612,7 @@ class CacheManager:
         dtypes_dict = {col: str(chunk_df[col].dtype) for col in chunk_df.columns}
 
         # Serialize each row with dtype information
-        row_data_list = [_to_json_str(record, dtypes=dtypes_dict) for record in records]
+        row_data_list = [self.codec.encode_row(record, dtypes=dtypes_dict) for record in records]
 
         tmp = pd.DataFrame(
             {
@@ -904,17 +872,6 @@ class CacheManager:
 
                 if can_use_basic:
                     # Use DataTypeCodec for serialization (JSON Schema v2)
-                    codec = DataTypeCodec()
-
-                    def smart_serialize(x: Any) -> Optional[str]:
-                        """Serialize value using DataTypeCodec (JSON Schema v2).
-
-                        Replaces old marker-based serialization with structured format.
-                        This function is used in Polars map_elements() pipeline.
-                        """
-                        # Delegate to codec for consistent serialization
-                        return codec.encode(x, dtype=None)
-
                     df_changed = (
                         joined.filter(basic_mask)
                         .select(
@@ -922,10 +879,10 @@ class CacheManager:
                                 pl.col("__row_key__").alias("row_key"),
                                 # Use DataTypeCodec serialization (v2 format)
                                 pl.col(old_col)
-                                .map_elements(smart_serialize, return_dtype=pl.Utf8)
+                                .map_elements(lambda x: self.codec.encode(x), return_dtype=pl.Utf8)
                                 .alias("old"),
                                 pl.col(new_col)
-                                .map_elements(smart_serialize, return_dtype=pl.Utf8)
+                                .map_elements(lambda x: self.codec.encode(x), return_dtype=pl.Utf8)
                                 .alias("new"),
                             ]
                         )
@@ -947,14 +904,6 @@ class CacheManager:
                         ) & (old_numeric != new_numeric)
 
                         # Use codec for float serialization
-                        codec = DataTypeCodec()
-
-                        def serialize_float(x: Any) -> Optional[str]:
-                            """Serialize float value using codec."""
-                            if x is None:
-                                return codec.encode(None, dtype="float64")
-                            return codec.encode(x, dtype="float64")
-
                         df_changed = (
                             joined.filter(numeric_mask)
                             .select(
@@ -962,11 +911,11 @@ class CacheManager:
                                     pl.col("__row_key__").alias("row_key"),
                                     # Use codec for high-precision float encoding
                                     old_numeric.map_elements(
-                                        serialize_float,
+                                        lambda x: self.codec.encode(x, dtype="float64"),
                                         return_dtype=pl.Utf8,
                                     ).alias("old"),
                                     new_numeric.map_elements(
-                                        serialize_float,
+                                        lambda x: self.codec.encode(x, dtype="float64"),
                                         return_dtype=pl.Utf8,
                                     ).alias("new"),
                                 ]
@@ -1074,7 +1023,7 @@ class CacheManager:
                     clean_row_dict[k] = v.item()
                 else:
                     clean_row_dict[k] = v
-            row_adds.append((str(r), _to_json_str(clean_row_dict, dtypes=cur_dtypes), timestamp))
+            row_adds.append((str(r), self.codec.encode_row(clean_row_dict, dtypes=cur_dtypes), timestamp))
 
         row_deletions = []
         for r in deleted_rows:
@@ -1094,13 +1043,13 @@ class CacheManager:
                 cell_rows.append((rk, str(ck), newv, timestamp))
 
             # Big rows become partial row maps stored in row_additions
-            # For big rows, values are already serialized by smart_serialize (JSON Schema v2)
+            # For big rows, values are already serialized by codec.encode() (JSON Schema v2)
             # We need to wrap them in a simple JSON dict, not double-encode
             for br in big_rows:
                 subset = all_changes_pdf[all_changes_pdf["row_key"] == br]
                 row_map: dict[str, str] = {}  # Map col_key -> serialized value (already JSON Schema v2)
                 for _, r in subset.iterrows():  # type: ignore[assignment]
-                    new_val = r["new"]  # type: ignore[index] - Already serialized by smart_serialize
+                    new_val = r["new"]  # type: ignore[index] - Already serialized by codec.encode()
                     col_key_val = r["col_key"]  # type: ignore[index]
                     row_map[str(col_key_val)] = new_val
                 # Use standard JSON (not codec) since values are already encoded
@@ -1134,7 +1083,7 @@ class CacheManager:
 
                 # Create dtype dict for this column's values
                 col_dtypes_dict = {key: col_dtype for key in col_data.keys()}
-                col_additions.append((str(c), _to_json_str(col_data, dtypes=col_dtypes_dict), timestamp))
+                col_additions.append((str(c), self.codec.encode_row(col_data, dtypes=col_dtypes_dict), timestamp))
 
         # Deleted columns: columns in prev not in cur
         deleted_cols = [c for c in prev_cols if c not in cur_cols]
