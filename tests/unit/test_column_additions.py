@@ -47,12 +47,9 @@ class TestColumnAdditions:
             len(changes.cell_changes) == 0
         )  # No cell changes since we use column_additions
 
-        # Verify column data is stored correctly
+        # Verify column data is stored correctly (JSON Schema v2 format)
         col_data_json = changes.column_additions.iloc[0]["col_data_json"]
-        import json
-
-        col_data = json.loads(col_data_json)
-        # Values are stored as their native types in JSON (integers as integers)
+        col_data = cache_manager.codec.decode_row(col_data_json)
         expected_data = {"row1": 7, "row2": 8, "row3": 9}
         assert col_data == expected_data
 
@@ -178,10 +175,8 @@ class TestColumnAdditions:
 
         assert len(changes.column_additions) == 1
         col_data_json = changes.column_additions.iloc[0]["col_data_json"]
-        import json
-
-        col_data = json.loads(col_data_json)
-        expected_data = {"row1": 4, "row2": None, "row3": 6}
+        col_data = cache_manager.codec.decode_row(col_data_json)
+        expected_data = {"row1": 4.0, "row2": None, "row3": 6.0}
         assert col_data == expected_data
 
     def test_column_deletion_and_addition_cycle(self, cache_manager):

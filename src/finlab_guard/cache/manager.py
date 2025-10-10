@@ -13,84 +13,41 @@ import pandas as pd
 import polars as pl
 from tqdm import tqdm
 
+from .codec import DataTypeCodec
+
 logger = logging.getLogger(__name__)
 
 
-def _to_json_str(obj: Any) -> str:
-    """Convert object to JSON string with enhanced type handling and precision preservation."""
-    import numpy as np
+def _to_json_str(obj: Any, dtypes: Optional[dict[str, str]] = None) -> str:
+    """Convert object to JSON string using DataTypeCodec (JSON Schema v2).
 
-    def _default(o: Any) -> Any:
-        # Check for NaN/NaT first before type checking (pandas NaN detection)
-        try:
-            if pd.isna(o):  # Handle NaT and NaN values
-                return None
-        except (TypeError, ValueError):
-            pass  # Not a pandas-compatible type
+    This function now delegates to DataTypeCodec for consistent serialization.
+    Supports both single values and row dictionaries.
 
-        # Handle numpy types with precision preservation
-        if isinstance(o, np.integer):
-            return int(o)
-        elif isinstance(o, np.floating):
-            return f"__HIGHPREC_FLOAT__{repr(float(o))}__"
-        elif isinstance(o, np.bool_):
-            return bool(o)
-        elif isinstance(o, np.ndarray):
-            return o.tolist()
-        # Handle Python native types with precision preservation
-        elif isinstance(o, float):
-            if np.isnan(o):
-                return None
-            return f"__HIGHPREC_FLOAT__{repr(o)}__"
-        elif isinstance(o, int):
-            return o
-        # Handle pandas types
-        elif hasattr(o, "item"):  # numpy scalar types
-            item_value = o.item()
-            if isinstance(item_value, float):
-                if np.isnan(item_value):
-                    return None
-                return f"__HIGHPREC_FLOAT__{repr(item_value)}__"
-            return item_value
-        # Enhanced pandas datetime handling
-        elif isinstance(o, pd.Timestamp):  # Direct pandas Timestamp handling
-            return o.isoformat() if not pd.isna(o) else None
-        elif hasattr(o, "to_pydatetime"):  # other pandas datetime types
-            return o.isoformat()
-        elif hasattr(o, "isoformat"):  # standard datetime objects
-            return o.isoformat()
-        # Fallback to string conversion
-        else:
-            return str(o)
+    Args:
+        obj: Value or dict to serialize
+        dtypes: Optional dtype mapping for row dict (column_name -> dtype string)
 
-    def _has_special_values(obj: Any) -> bool:
-        """Check if object contains inf/nan values that orjson can't handle."""
-        if isinstance(obj, (int, float)):
-            return bool(np.isinf(obj) or np.isnan(obj))
-        elif isinstance(obj, dict):
-            return any(_has_special_values(v) for v in obj.values())
-        elif isinstance(obj, (list, tuple)):
-            return any(_has_special_values(v) for v in obj)
-        elif hasattr(obj, "__array__"):  # numpy arrays/scalars
-            try:
-                result = np.any(np.isinf(obj)) or np.any(np.isnan(obj))
-                return bool(result)
-            except (TypeError, ValueError):
-                return False
-        return False
+    Returns:
+        JSON string in Schema v2 format
 
-    # Use standard JSON for special values (orjson converts inf/nan to null)
-    if _has_special_values(obj):
-        return json.dumps(obj, default=_default, ensure_ascii=False)
+    Note:
+        - For dict objects: Uses encode_row() to serialize entire row
+        - For single values: Uses encode() for individual value
+        - Minimal fallbacks (< 3), all documented in DataTypeCodec
+    """
+    codec = DataTypeCodec()
 
-    try:
-        # Try orjson for better performance on normal values
-        import orjson
-
-        return orjson.dumps(obj, default=_default).decode("utf-8")
-    except Exception:
-        # Fallback to standard json
-        return json.dumps(obj, default=_default, ensure_ascii=False)
+    if isinstance(obj, dict):
+        # Serialize entire row (dict of column -> value)
+        return codec.encode_row(obj, dtypes=dtypes)
+    else:
+        # Serialize single value
+        # Extract dtype if available from dtypes dict
+        dtype = None
+        if dtypes and len(dtypes) == 1:
+            dtype = list(dtypes.values())[0]
+        return codec.encode(obj, dtype=dtype)
 
 
 @dataclass
@@ -128,6 +85,9 @@ class CacheManager:
         self.config = config
         self.compression = config.get("compression", "snappy")
         self.row_change_threshold = config.get("row_change_threshold", 200)
+
+        # Initialize codec for serialization/deserialization
+        self.codec = DataTypeCodec()
 
         # Initialize DuckDB connection
         db_path = cache_dir / "cache.duckdb"
@@ -350,9 +310,9 @@ class CacheManager:
 
         dtype_path = self._get_dtype_path(key)
         with open(dtype_path, "w", encoding="utf-8") as f:
-            # Use enhanced JSON serialization to handle Timestamp objects
-            dtype_json_str = _to_json_str(dtype_mapping)
-            f.write(dtype_json_str)
+            # Use standard JSON for dtype mapping (not DataFrame data)
+            # dtype_mapping is just metadata, doesn't need JSON Schema v2
+            json.dump(dtype_mapping, f, ensure_ascii=False, indent=2)
 
         logger.debug(f"Saved new dtype entry for {key} at {new_entry['timestamp']}")
 
@@ -679,7 +639,12 @@ class CacheManager:
         """
         row_keys = [str(idx) for idx in chunk_df.index]
         records = chunk_df.to_dict("records")
-        row_data_list = [_to_json_str(record) for record in records]
+
+        # Extract dtype information for encoding
+        dtypes_dict = {col: str(chunk_df[col].dtype) for col in chunk_df.columns}
+
+        # Serialize each row with dtype information
+        row_data_list = [_to_json_str(record, dtypes=dtypes_dict) for record in records]
 
         tmp = pd.DataFrame(
             {
@@ -928,55 +893,34 @@ class CacheManager:
                 ) & (pl.col(old_col) != pl.col(new_col))
 
                 # Check if this basic comparison can work
+                # Fallback #1 (comparison): Test if Polars can execute basic comparison
+                # Trigger: Type mismatch or unsupported operations in Polars
                 can_use_basic = True
                 try:
                     joined.select(basic_mask).limit(1)
                 except Exception:
                     can_use_basic = False
+                    logger.debug(f"Basic comparison failed for column {col}, trying numeric fallback")
 
                 if can_use_basic:
-                    # Use smart serialization to handle various data types consistently
+                    # Use DataTypeCodec for serialization (JSON Schema v2)
+                    codec = DataTypeCodec()
+
                     def smart_serialize(x: Any) -> Optional[str]:
-                        """Smart serialization that preserves data types with explicit markers."""
-                        import numpy as np
+                        """Serialize value using DataTypeCodec (JSON Schema v2).
 
-                        # Handle None explicitly
-                        if x is None:
-                            return "__NONE__"
-
-                        # Check for pandas NA (pd.NA is a special singleton)
-                        try:
-                            # pd.NA has type pandas._libs.missing.NAType
-                            if pd.isna(x):
-                                # Distinguish between different NA types
-                                x_type = type(x).__name__
-                                if x_type == "NAType":  # pandas pd.NA
-                                    return "__PD_NA__"
-                                # For other NA values, continue to check type
-                        except (TypeError, ValueError):
-                            pass  # Not a pandas-compatible type
-
-                        # Handle boolean first (before int, since bool is subclass of int)
-                        if isinstance(x, (bool, np.bool_)):
-                            return f"__BOOL__{str(x)}__"  # "__BOOL__True__" or "__BOOL__False__"
-                        # Mark integers explicitly to prevent confusion with string numbers
-                        elif isinstance(x, (int, np.integer)):
-                            return f"__INT__{int(x)}__"  # "__INT__1__", "__INT__-42__", etc.
-                        elif isinstance(x, (float, np.floating)):
-                            if np.isnan(x):
-                                return "__NAN__"  # Explicit NaN marker
-                            return (
-                                f"__FLOAT__{repr(float(x))}__"  # Unified float marker
-                            )
-                        else:
-                            return str(x)  # Strings remain unmarked
+                        Replaces old marker-based serialization with structured format.
+                        This function is used in Polars map_elements() pipeline.
+                        """
+                        # Delegate to codec for consistent serialization
+                        return codec.encode(x, dtype=None)
 
                     df_changed = (
                         joined.filter(basic_mask)
                         .select(
                             [
                                 pl.col("__row_key__").alias("row_key"),
-                                # Use smart serialization to preserve original data types
+                                # Use DataTypeCodec serialization (v2 format)
                                 pl.col(old_col)
                                 .map_elements(smart_serialize, return_dtype=pl.Utf8)
                                 .alias("old"),
@@ -989,39 +933,50 @@ class CacheManager:
                     )
                 else:
                     # Fallback: try float comparison for mixed types
+                    # This handles cases where direct comparison fails due to type mismatch
                     old_numeric = pl.col(old_col).cast(pl.Float64, strict=False)
                     new_numeric = pl.col(new_col).cast(pl.Float64, strict=False)
 
                     # Check if numeric conversion works
+                    # Fallback #2 (comparison): Test if numeric casting works
+                    # Trigger: Basic comparison failed, trying float64 conversion
                     try:
                         joined.select(old_numeric, new_numeric).limit(1)
                         numeric_mask = (
                             ~(pl.col(old_col).is_null() & pl.col(new_col).is_null())
                         ) & (old_numeric != new_numeric)
+
+                        # Use codec for float serialization
+                        codec = DataTypeCodec()
+
+                        def serialize_float(x: Any) -> Optional[str]:
+                            """Serialize float value using codec."""
+                            if x is None:
+                                return codec.encode(None, dtype="float64")
+                            return codec.encode(x, dtype="float64")
+
                         df_changed = (
                             joined.filter(numeric_mask)
                             .select(
                                 [
                                     pl.col("__row_key__").alias("row_key"),
-                                    # Only use high-precision encoding for actual floats
+                                    # Use codec for high-precision float encoding
                                     old_numeric.map_elements(
-                                        lambda x: f"__HIGHPREC_FLOAT__{repr(x)}__"
-                                        if x is not None
-                                        else None,
+                                        serialize_float,
                                         return_dtype=pl.Utf8,
                                     ).alias("old"),
                                     new_numeric.map_elements(
-                                        lambda x: f"__HIGHPREC_FLOAT__{repr(x)}__"
-                                        if x is not None
-                                        else None,
+                                        serialize_float,
                                         return_dtype=pl.Utf8,
                                     ).alias("new"),
                                 ]
                             )
                             .with_columns(pl.lit(col).alias("col_key"))
                         )
-                    except Exception:
-                        # Final fallback to string comparison
+                    except Exception as e:
+                        # Fallback #3 (comparison): Final fallback to string comparison
+                        # Trigger: Numeric conversion also failed
+                        logger.debug(f"Numeric comparison failed for column {col}: {e}, using string comparison")
                         string_mask = (
                             ~(pl.col(old_col).is_null() & pl.col(new_col).is_null())
                         ) & (
@@ -1039,8 +994,10 @@ class CacheManager:
                             )
                             .with_columns(pl.lit(col).alias("col_key"))
                         )
-            except Exception:
-                # Fallback to string comparison if numeric comparison fails
+            except Exception as e:
+                # Fallback #4 (comparison): Top-level fallback to string comparison
+                # Trigger: All previous comparison methods failed
+                logger.debug(f"All comparisons failed for column {col}: {e}, final string fallback")
                 string_mask = (
                     ~(pl.col(old_col).is_null() & pl.col(new_col).is_null())
                 ) & (pl.col(old_col).cast(pl.Utf8) != pl.col(new_col).cast(pl.Utf8))
@@ -1100,6 +1057,9 @@ class CacheManager:
         deleted_rows = [k for k in prev_keys if k not in cur_keys_set]
 
         row_adds = []
+        # Extract dtype information from current DataFrame for encoding
+        cur_dtypes = {col: str(cur[col].dtype) for col in cur.columns}
+
         for r in new_rows:
             # Convert row to dict and ensure JSON serializable types
             # r is string, need to map back to original index for DataFrame access
@@ -1114,7 +1074,7 @@ class CacheManager:
                     clean_row_dict[k] = v.item()
                 else:
                     clean_row_dict[k] = v
-            row_adds.append((str(r), _to_json_str(clean_row_dict), timestamp))
+            row_adds.append((str(r), _to_json_str(clean_row_dict, dtypes=cur_dtypes), timestamp))
 
         row_deletions = []
         for r in deleted_rows:
@@ -1128,38 +1088,25 @@ class CacheManager:
                 ck = row["col_key"]
                 if rk in big_rows:
                     continue
-                # Handle type conversion for cell values
-                if pd.isna(row["new"]):
-                    newv = None  # type: ignore[unreachable]
-                elif hasattr(  # type: ignore[unreachable]
-                    row["new"], "item"
-                ):  # numpy scalar types
-                    newv = row["new"].item()
-                elif isinstance(row["new"], str) and row["new"].lower() in {
-                    "true",
-                    "false",
-                }:
-                    newv = True if row["new"].lower() == "true" else False
-                else:
-                    newv = row["new"]  # Already serialized by smart_serialize
-                cell_rows.append(  # type: ignore[unreachable]
-                    (rk, str(ck), _to_json_str(newv), timestamp)
-                )  # Don't double-serialize
+                # The "new" value is already serialized by smart_serialize (JSON Schema v2)
+                # Just pass it through without double-serialization
+                newv = row["new"]
+                cell_rows.append((rk, str(ck), newv, timestamp))
 
             # Big rows become partial row maps stored in row_additions
+            # For big rows, values are already serialized by smart_serialize (JSON Schema v2)
+            # We need to wrap them in a simple JSON dict, not double-encode
             for br in big_rows:
                 subset = all_changes_pdf[all_changes_pdf["row_key"] == br]
-                row_map: dict[str, Any] = {}
+                row_map: dict[str, str] = {}  # Map col_key -> serialized value (already JSON Schema v2)
                 for _, r in subset.iterrows():  # type: ignore[assignment]
-                    new_val = r["new"]  # type: ignore[index]
+                    new_val = r["new"]  # type: ignore[index] - Already serialized by smart_serialize
                     col_key_val = r["col_key"]  # type: ignore[index]
-                    if pd.isna(new_val):
-                        row_map[str(col_key_val)] = None  # type: ignore[unreachable]
-                    elif hasattr(new_val, "item"):  # numpy scalar types
-                        row_map[str(col_key_val)] = new_val.item()
-                    else:
-                        row_map[str(col_key_val)] = new_val
-                row_adds.append((str(br), _to_json_str(row_map), timestamp))
+                    row_map[str(col_key_val)] = new_val
+                # Use standard JSON (not codec) since values are already encoded
+                # This creates: {"col1": "JSON-v2-string", "col2": "JSON-v2-string"}
+                row_map_json = json.dumps(row_map, ensure_ascii=False)
+                row_adds.append((str(br), row_map_json, timestamp))
 
         # New columns: store as column_additions with full column data
         new_cols = [c for c in cur_cols if c not in prev_cols]
@@ -1168,6 +1115,8 @@ class CacheManager:
             for c in new_cols:
                 # Extract the full column data as a dictionary {row_key: value}
                 col_data = {}
+                col_dtype = str(cur[c].dtype)  # Get dtype for this column
+
                 for (
                     r
                 ) in cur_keys:  # r is now original type, can access DataFrame directly
@@ -1182,7 +1131,10 @@ class CacheManager:
                             col_data[str(r)] = v.item()  # Convert to string for storage
                         else:
                             col_data[str(r)] = v  # Convert to string for storage
-                col_additions.append((str(c), _to_json_str(col_data), timestamp))
+
+                # Create dtype dict for this column's values
+                col_dtypes_dict = {key: col_dtype for key in col_data.keys()}
+                col_additions.append((str(c), _to_json_str(col_data, dtypes=col_dtypes_dict), timestamp))
 
         # Deleted columns: columns in prev not in cur
         deleted_cols = [c for c in prev_cols if c not in cur_cols]
@@ -1241,16 +1193,53 @@ class CacheManager:
         )
 
     def _parse_json_batch(self, json_strings: list[str]) -> list[dict]:
-        """Parse JSON strings with orjson -> json fallback."""
+        """Parse JSON strings and decode JSON Schema v2 format.
+
+        Handles three cases:
+        1. JSON Schema v2 full row: {"v":2,"d":{"col1":{...},"col2":{...}}}
+        2. Dict with nested JSON strings: {"col1":"JSON-v2","col2":"JSON-v2"}
+        3. Legacy format: direct dict {col1: val1, ...}
+        """
         parsed = []
         for s in json_strings:
+            if not s:
+                parsed.append({})
+                continue
+
+            # Parse JSON string
             try:
-                parsed.append(orjson.loads(s) if s else {})
+                obj = orjson.loads(s)
             except Exception:
                 try:
-                    parsed.append(json.loads(s) if s else {})
+                    obj = json.loads(s)
                 except Exception:
                     parsed.append({})
+                    continue
+
+            # Case 1: JSON Schema v2 full row format
+            if isinstance(obj, dict) and obj.get("v") == 2 and "d" in obj:
+                # Decode using codec
+                decoded_row = self.codec.decode_row(s)
+                parsed.append(decoded_row)
+            # Case 2: Dict with values being JSON Schema v2 strings (for big rows)
+            elif isinstance(obj, dict) and obj:
+                # Check if first value looks like JSON Schema v2
+                first_val = next(iter(obj.values()), None)
+                if isinstance(first_val, str) and first_val.startswith('{"v":2'):
+                    # Decode each value
+                    decoded_dict = {}
+                    for k, v in obj.items():
+                        if isinstance(v, str):
+                            decoded_dict[k] = self.codec.decode(v)
+                        else:
+                            decoded_dict[k] = v
+                    parsed.append(decoded_dict)
+                else:
+                    # Case 3: Legacy format - use as is
+                    parsed.append(obj)
+            else:
+                parsed.append(obj)
+
         return parsed
 
     def reconstruct_as_of(self, table_id: str, target_time: datetime) -> pd.DataFrame:
@@ -1522,10 +1511,27 @@ class CacheManager:
         return pivot_pl
 
     def _parse_marker_string(self, s: str) -> Optional[Any]:
-        """Parse type marker strings like __INT__123__, __BOOL__True__, __FLOAT__1.5__.
+        """Parse legacy type marker strings (backward compatibility).
+
+        LEGACY SUPPORT: This function handles old marker-based serialization format.
+        New data uses JSON Schema v2 format (see codec.py).
+
+        Supported markers:
+        - __INT__123__ → int
+        - __BOOL__True__ / __BOOL__False__ → bool
+        - __FLOAT__1.5__ / __HIGHPREC_FLOAT__1.5__ → float
+        - __NAN__ → np.nan
+        - __PD_NA__ → pd.NA
+        - __NONE__ → None
+
+        Args:
+            s: String to check for markers
 
         Returns:
             Parsed value if a valid marker is found, None otherwise.
+
+        Note:
+            This function can be removed once all legacy cache data is migrated to v2 format.
         """
         if not isinstance(s, str):
             return None  # type: ignore[unreachable]
@@ -1583,45 +1589,61 @@ class CacheManager:
         return None
 
     def _parse_json_value(self, x: Any) -> Any:
-        """Parse JSON value with smart type conversion and precision preservation.
+        """Parse JSON value with support for JSON Schema v2 and legacy formats.
 
-        Handles:
-        - Direct marker strings: __INT__123__, __BOOL__True__, __FLOAT__1.5__
-        - JSON-encoded values containing markers
-        - Primitive types (int, float, bool)
-        - Regular strings (returned as-is, no type guessing)
+        Priority order:
+        1. JSON Schema v2: {"v":2,"val":...,"type":...} → uses codec.decode()
+        2. Legacy marker strings: __INT__123__, __BOOL__True__ → uses _parse_marker_string()
+        3. JSON-encoded strings → orjson.loads()
+        4. Primitive types and plain strings → returned as-is
+
+        Args:
+            x: Value to parse (any type)
+
+        Returns:
+            Parsed value with appropriate type
         """
-        # Fast path: primitive types
+        # Fast path: primitive types (already correct)
         if x is None:
             return None
         if isinstance(x, (int, float, bool)):
             return x
 
-        # String parsing
+        # String parsing (most common case)
         if isinstance(x, str):
-            # Check for direct marker strings first (before JSON parsing)
+            # Priority 1: JSON Schema v2 format (new format)
+            if x.startswith('{"v":2'):
+                try:
+                    return self.codec.decode(x)
+                except Exception:
+                    # Fallback #6 (parse): Continue to legacy parsing if codec fails
+                    # Trigger: Malformed JSON Schema v2 string
+                    pass
+
+            # Priority 2: Legacy marker strings (backward compatibility)
             marker_result = self._parse_marker_string(x)
             if marker_result is not None:
                 return marker_result
 
-            # Try JSON parsing (for JSON-encoded strings)
+            # Priority 3: Try JSON parsing for nested JSON strings
             try:
                 parsed = orjson.loads(x) if x else None
 
-                # If parsed result is a string, check for markers
+                # If parsed is still a string, check for markers again
                 if isinstance(parsed, str):
                     marker_result = self._parse_marker_string(parsed)
                     if marker_result is not None:
                         return marker_result
 
-                # Return parsed value as-is (no type guessing)
                 return parsed
 
             except Exception:
-                # No type guessing - return the original string
+                # Fallback #7 (parse): Return original string if not JSON
+                # Trigger: Not a valid JSON string (e.g., plain text)
+                # No type guessing - explicit is better than implicit
                 return x
 
-        # Non-string, non-primitive types
+        # Non-string, non-primitive types (pass through)
         return x
 
     def _load_and_process_row_additions(
@@ -1939,13 +1961,38 @@ class CacheManager:
             for _, row in col_add_df.iterrows():
                 col_key = str(row["col_key"])
                 col_data_json_str = str(row["col_data_json"])
+
+                # Parse JSON and check if it's JSON Schema v2 format
                 try:
-                    col_data = orjson.loads(col_data_json_str)
+                    obj = orjson.loads(col_data_json_str)
                 except Exception:
                     try:
-                        col_data = json.loads(col_data_json_str)
+                        obj = json.loads(col_data_json_str)
                     except Exception:
+                        column_data[col_key] = {}
+                        continue
+
+                # Decode if JSON Schema v2
+                if isinstance(obj, dict) and obj.get("v") == 2 and "d" in obj:
+                    # Full row JSON Schema v2 format
+                    col_data = self.codec.decode_row(col_data_json_str)
+                elif isinstance(obj, dict):
+                    # Check if values are JSON Schema v2 strings
+                    first_val = next(iter(obj.values()), None) if obj else None
+                    if isinstance(first_val, str) and first_val.startswith('{"v":2'):
+                        # Decode each value
                         col_data = {}
+                        for k, v in obj.items():
+                            if isinstance(v, str):
+                                col_data[k] = self.codec.decode(v)
+                            else:
+                                col_data[k] = v
+                    else:
+                        # Legacy format
+                        col_data = obj
+                else:
+                    col_data = obj
+
                 column_data[col_key] = col_data
 
         return column_data
@@ -2042,13 +2089,21 @@ class CacheManager:
     def _apply_dtypes_to_result(
         self, result: pd.DataFrame, key: str, target_time: Optional[datetime] = None
     ) -> pd.DataFrame:
-        """
-        Apply saved dtypes to reconstructed DataFrame.
+        """Apply saved metadata (index/columns properties) to reconstructed DataFrame.
+
+        Note: Since Phase 2, column dtypes are already correct from JSON Schema v2 decoding.
+        This function only handles:
+        1. Categorical metadata restoration (requires categories info)
+        2. Index/columns dtype, name, order
+        3. DatetimeIndex frequency
 
         Args:
-            result: DataFrame to apply dtypes to (modified in place)
+            result: DataFrame to apply metadata to
             key: Dataset key to load dtype mapping for
             target_time: Target time point for dtype lookup
+
+        Returns:
+            DataFrame with metadata applied
         """
         dtype_mapping = self._get_dtype_mapping_at_time(key, target_time)
         if not dtype_mapping or "dtypes" not in dtype_mapping:
@@ -2057,279 +2112,177 @@ class CacheManager:
         dtypes = dtype_mapping["dtypes"]
         categorical_metadata = dtype_mapping.get("categorical_metadata", {})
 
-        # Apply saved dtypes to columns
+        # Apply column dtypes
+        # Note: Most dtypes are already correct from codec decoding (JSON Schema v2),
+        # but we still need to handle edge cases and ensure consistency
         for col, dtype_str in dtypes.items():
-            if col in result.columns and dtype_str and dtype_str != "None":
-                logger.debug(
-                    f"Applying dtype '{dtype_str}' to column '{col}', current dtype: {result[col].dtype}"
-                )
-                try:
-                    # Pre-processing: If column is object type and can be parsed as datetime, convert it first
-                    # This prevents "2018-10-01 00:00:00" -> float conversion from producing NaN
-                    if result[col].dtype == "object" and dtype_str == "datetime64[ns]":
-                        try:
-                            # Convert entire column to datetime64
-                            result[col] = result[col].astype(
-                                pd.api.types.pandas_dtype("datetime64[ns]")
-                            )
-                        except Exception:
-                            pass  # Not a datetime string, continue with original logic
+            if col not in result.columns or not dtype_str or dtype_str == "None":
+                continue
 
-                    # Since values are stored as strings, convert them back
-                    elif "int" in dtype_str:
-                        # Convert string values to numeric first, then to target int type
-                        try:
-                            numeric_col = pd.to_numeric(result[col], errors="coerce")
-                            # Check if there are any NaN values that would cause integer conversion to fail
-                            if numeric_col.isna().any():
-                                # Keep as object if there are unconvertible values
-                                pass
-                            else:
-                                result[col] = numeric_col.astype(dtype_str)
-                        except (ValueError, TypeError) as e:
-                            logger.debug(
-                                f"Failed to convert column '{col}' to {dtype_str}: {e}"
-                            )
-                            # Keep original dtype if conversion fails
-                    elif "float" in dtype_str:
-                        try:
-                            result[col] = pd.to_numeric(
-                                result[col], errors="coerce"
-                            ).astype(dtype_str)
-                        except (ValueError, TypeError) as e:
-                            logger.debug(
-                                f"Failed to convert column '{col}' to {dtype_str}: {e}"
-                            )
-                            # Keep original dtype if conversion fails
-                    elif "bool" in dtype_str:
-                        # Handle both boolean values and string boolean values
-                        if result[col].dtype == "bool":
-                            # Already boolean, no conversion needed
-                            pass
-                        else:
-                            # Convert string boolean values back to bool
-                            result[col] = (
-                                result[col]
-                                .map(
-                                    {
-                                        "True": True,
-                                        "False": False,
-                                        True: True,
-                                        False: False,
-                                    }
-                                )
-                                .astype("bool")
-                            )
-                    elif dtype_str == "category":
-                        # Handle categorical dtypes with proper metadata restoration
-                        if col in categorical_metadata:
-                            cat_meta = categorical_metadata[col]
-                            categories = cat_meta["categories"]
-                            ordered = cat_meta.get("ordered", False)
-                            categories_dtype = cat_meta.get(
-                                "categories_dtype", "object"
-                            )
+            # Categorical dtype requires special handling (metadata restoration)
+            if dtype_str == "category":
+                if col in categorical_metadata:
+                    cat_meta = categorical_metadata[col]
+                    categories = cat_meta["categories"]
+                    ordered = cat_meta.get("ordered", False)
+                    categories_dtype = cat_meta.get("categories_dtype", "object")
 
-                            # Convert categories to proper dtype if specified
-                            if categories_dtype != "object":
-                                try:
-                                    categories = pd.Index(categories).astype(
-                                        categories_dtype
-                                    )
-                                except (ValueError, TypeError):
-                                    categories = pd.Index(categories)
-                            else:
-                                categories = pd.Index(categories)
+                    # Convert categories to proper dtype if specified
+                    if categories_dtype != "object":
+                        try:
+                            categories = pd.Index(categories).astype(categories_dtype)
+                        except (ValueError, TypeError):
+                            categories = pd.Index(categories)
+                    else:
+                        categories = pd.Index(categories)
 
+                    try:
+                        # Filter out null-like values
+                        series = pd.Series(result[col])
+                        mask = (
+                            series.notna()
+                            & (series != "")
+                            & (series != "nan")
+                            & (series != "None")
+                            & (series != "NaN")
+                        )
+                        unique_values_raw = series[mask].unique()
+
+                        # Convert unique values to match categories dtype
+                        if categories_dtype != "object":
                             try:
-                                # Check if all values in result[col] are in categories
-                                # Convert unique values to match categories dtype for proper comparison
-                                # Filter out None, empty strings, and string representations of null
-                                series = pd.Series(result[col])
-                                # Remove actual None/NaN and string representations like "nan", "None", ""
-                                mask = (
-                                    series.notna()
-                                    & (series != "")
-                                    & (series != "nan")
-                                    & (series != "None")
-                                    & (series != "NaN")
+                                unique_values = pd.Index(unique_values_raw).astype(
+                                    categories_dtype
                                 )
-                                unique_values_raw = series[mask].unique()
+                            except (ValueError, TypeError):
+                                unique_values = unique_values_raw
+                        else:
+                            unique_values = unique_values_raw
 
-                                if categories_dtype != "object":
-                                    try:
-                                        # Convert to same dtype as categories to avoid type mismatch
-                                        # e.g., string "1.0" vs float 1.0
-                                        unique_values = pd.Index(
-                                            unique_values_raw
-                                        ).astype(categories_dtype)
-                                    except (ValueError, TypeError):
-                                        # If conversion fails, use raw values
-                                        unique_values = unique_values_raw
-                                else:
-                                    unique_values = unique_values_raw
+                        # Extend categories if needed
+                        missing_categories = set(unique_values) - set(categories)
+                        if missing_categories:
+                            categories = pd.Index(
+                                list(categories) + list(missing_categories)
+                            )
 
-                                missing_categories = set(unique_values) - set(
-                                    categories
-                                )
-
-                                if missing_categories:
-                                    # Extend categories to include missing values
-                                    extended_categories = list(categories) + list(
-                                        missing_categories
-                                    )
-                                    categories = pd.Index(extended_categories)
-
-                                # Convert result[col] to match categories dtype before creating Categorical
-                                # This prevents type mismatch (e.g., string "1.0" vs float 1.0)
-                                if categories_dtype != "object":
-                                    try:
-                                        result[col] = pd.Series(result[col]).astype(
-                                            categories_dtype
-                                        )
-                                    except (ValueError, TypeError) as e:
-                                        logger.debug(
-                                            f"Failed to convert column '{col}' to {categories_dtype}: {e}"
-                                        )
-                                        # Keep as-is if conversion fails
-
-                                result[col] = pd.Categorical(
-                                    result[col], categories=categories, ordered=ordered
+                        # Convert column to match categories dtype
+                        if categories_dtype != "object":
+                            try:
+                                result[col] = pd.Series(result[col]).astype(
+                                    categories_dtype
                                 )
                             except (ValueError, TypeError) as e:
                                 logger.debug(
-                                    f"Failed to restore categorical for column '{col}': {e}"
+                                    f"Failed to convert column '{col}' to {categories_dtype}: {e}"
                                 )
-                                # Fallback to simple categorical conversion
-                                result[col] = result[col].astype("category")
-                        else:
-                            # Fallback to simple categorical conversion
-                            result[col] = result[col].astype("category")
-                    elif dtype_str == "string" or dtype_str == "object":
-                        # Keep as string
-                        result[col] = result[col].replace("<NA>", pd.NA)
-                        result[col] = result[col].astype(dtype_str)
-                    else:
-                        # Try direct conversion
-                        try:
-                            target_dtype = pd.api.types.pandas_dtype(dtype_str)
-                            result[col] = result[col].astype(target_dtype)
-                        except (ValueError, TypeError):
-                            pass
-                except (ValueError, TypeError, Exception) as e:
-                    # Fallback: try to convert from string
-                    logger.debug(
-                        f"First dtype conversion failed for column '{col}': {e}"
-                    )
-                    try:
-                        if "int" in dtype_str:
-                            numeric_col = pd.to_numeric(result[col], errors="coerce")
-                            # Check if there are any NaN values that would cause integer conversion to fail
-                            if not numeric_col.isna().any():
-                                result[col] = numeric_col.astype(dtype_str)
-                        elif "float" in dtype_str:
-                            try:
-                                result[col] = pd.to_numeric(
-                                    result[col], errors="coerce"
-                                ).astype(dtype_str)
-                            except (ValueError, TypeError):
-                                pass
-                        elif "bool" in dtype_str:
-                            result[col] = (
-                                result[col]
-                                .map({"True": True, "False": False})
-                                .fillna(False)
-                                .astype("bool")
-                            )
-                    except (ValueError, TypeError) as e2:
-                        logger.debug(
-                            f"Fallback dtype conversion also failed for column '{col}': {e2}, keeping original dtype {result[col].dtype}"
-                        )
 
-        # Apply saved dtype to index
+                        result[col] = pd.Categorical(
+                            result[col], categories=categories, ordered=ordered
+                        )
+                    except (ValueError, TypeError) as e:
+                        # Fallback #1 (categorical): Simple categorical conversion
+                        # Trigger: Categories restoration failed
+                        logger.debug(
+                            f"Failed to restore categorical for column '{col}': {e}, using simple conversion"
+                        )
+                        result[col] = result[col].astype("category")
+                else:
+                    # No metadata available, use simple categorical
+                    result[col] = result[col].astype("category")
+
+            # Other dtypes: Try direct conversion if needed
+            # This handles cases where:
+            # 1. Data was not decoded through codec (direct API calls)
+            # 2. Specific dtype precision is required (e.g., int32 vs int64)
+            else:
+                current_dtype = result[col].dtype
+                target_dtype_obj = pd.api.types.pandas_dtype(dtype_str)
+
+                # Skip if already correct dtype
+                if current_dtype == target_dtype_obj:
+                    continue
+
+                try:
+                    # Direct conversion for most types
+                    result[col] = result[col].astype(dtype_str)
+                except (ValueError, TypeError) as e:
+                    # Fallback #2 (dtype): Keep original if conversion fails
+                    # Trigger: Type conversion error (e.g., invalid string to int)
+                    logger.debug(
+                        f"Failed to convert column '{col}' to {dtype_str}: {e}, keeping {current_dtype}"
+                    )
+
+        # Apply index metadata
         index_dtype = dtype_mapping.get("index_dtype")
         if index_dtype and index_dtype != "None":
             try:
                 result.index = result.index.astype(index_dtype)
-            except (ValueError, TypeError, Exception):
-                # Fallback: keep original index dtype
+            except (ValueError, TypeError) as e:
+                # Fallback #3 (index): Keep original index dtype if conversion fails
+                # Trigger: Index dtype conversion error (e.g., string to numeric)
                 logger.debug(
-                    f"Failed to convert index to dtype {index_dtype}, keeping original"
+                    f"Failed to convert index to dtype {index_dtype}: {e}, keeping original"
                 )
-                pass
 
-        # Store frequency info before any index modifications
-        index_freq = dtype_mapping.get("index_freq")
-
-        # Apply saved dtype to columns (the columns object itself)
-        columns_dtype = dtype_mapping.get("columns_dtype")
-        if columns_dtype and columns_dtype != "None":
-            try:
-                result.columns = result.columns.astype(columns_dtype)
-            except (ValueError, TypeError, Exception):
-                # Fallback: keep original columns dtype
-                logger.debug(
-                    f"Failed to convert columns to dtype {columns_dtype}, keeping original"
-                )
-                pass
-
-        # Apply saved index name
         index_name = dtype_mapping.get("index_name")
         if index_name is not None:
             result.index.name = index_name
 
-        # Apply saved columns name
-        columns_name = dtype_mapping.get("columns_name")
-        if columns_name is not None:
-            result.columns.name = columns_name
-
-        # Apply saved index order
         index_order = dtype_mapping.get("index_order")
         if index_order is not None and set(index_order) == set(result.index):
             result = result.loc[index_order]
 
-        # Apply saved columns order
+        # Apply columns metadata
+        columns_dtype = dtype_mapping.get("columns_dtype")
+        if columns_dtype and columns_dtype != "None":
+            try:
+                result.columns = result.columns.astype(columns_dtype)
+            except (ValueError, TypeError) as e:
+                # Fallback #4 (columns): Keep original columns dtype if conversion fails
+                # Trigger: Columns dtype conversion error
+                logger.debug(
+                    f"Failed to convert columns to dtype {columns_dtype}: {e}, keeping original"
+                )
+
+        columns_name = dtype_mapping.get("columns_name")
+        if columns_name is not None:
+            result.columns.name = columns_name
+
         columns_order = dtype_mapping.get("columns_order")
         if columns_order is not None and set(columns_order) == set(result.columns):
-            # Reorder columns to match the saved order
             result = result[columns_order]
 
-        # Apply saved frequency to index (for DatetimeIndex) - do this after reordering
+        # Apply DatetimeIndex frequency (if applicable)
+        index_freq = dtype_mapping.get("index_freq")
         if (
             index_freq
             and index_freq != "None"
             and isinstance(result.index, pd.DatetimeIndex)
         ):
             try:
-                # Try to set the frequency using pandas' to_offset, constructing a new
-                # DatetimeIndex with the same values but with the desired freq.
-                try:
-                    from pandas.tseries.frequencies import to_offset
+                from pandas.tseries.frequencies import to_offset
 
-                    offset = to_offset(index_freq)
-                    # Preserve index name when creating new DatetimeIndex
-                    original_name = result.index.name
-                    result.index = pd.DatetimeIndex(
-                        result.index.values, freq=offset, name=original_name
-                    )
-                except Exception:
-                    # Fallback: try using asfreq on a temporary Series
-                    try:
-                        tmp = pd.Series([None] * len(result), index=result.index)
-                        tmp = tmp.asfreq(index_freq)
-                        # Preserve index name when using asfreq fallback
-                        original_name = result.index.name
-                        result.index = tmp.index
-                        result.index.name = original_name
-                    except Exception:
-                        # If we still can't set freq, continue without raising
-                        pass
-            except (ValueError, TypeError, Exception) as e:
-                # Fallback: keep original index frequency
-                logger.debug(
-                    f"Failed to set index frequency to {index_freq}: {e}, keeping original"
+                offset = to_offset(index_freq)
+                original_name = result.index.name
+                result.index = pd.DatetimeIndex(
+                    result.index.values, freq=offset, name=original_name
                 )
-                pass
+            except Exception:
+                # Fallback #4 (frequency): Try asfreq method
+                # Trigger: to_offset() failed or DatetimeIndex construction failed
+                try:
+                    tmp = pd.Series([None] * len(result), index=result.index)
+                    tmp = tmp.asfreq(index_freq)
+                    original_name = result.index.name
+                    result.index = tmp.index
+                    result.index.name = original_name
+                except Exception as e:
+                    # Fallback #5 (frequency): Keep original if both methods fail
+                    # Trigger: asfreq also failed (e.g., non-uniform DatetimeIndex)
+                    logger.debug(
+                        f"Failed to set index frequency to {index_freq}: {e}, keeping original"
+                    )
 
         return result
 
