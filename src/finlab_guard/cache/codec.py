@@ -334,8 +334,12 @@ class DataTypeCodec:
                 from datetime import datetime
                 logger.warning(f"Timestamp out of pandas range: {e}, using datetime")
                 return datetime.fromisoformat(value)
-        elif dtype_str == "object":
+        elif dtype_str in ("object", "string"):
             # Keep as-is (string or other object)
+            return value
+        elif dtype_str == "category":
+            # Categorical values are stored as their underlying value
+            # Categorical metadata is restored later in _apply_dtypes_to_result
             return value
         else:
             # Unsupported dtype - this should not happen if encoding is correct

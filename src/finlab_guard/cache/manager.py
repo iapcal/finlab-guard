@@ -1371,26 +1371,13 @@ class CacheManager:
 
         # Process cell changes and pivot
         if not changes_pl.is_empty():
-            # Parse JSON values but convert to string for pivot compatibility
-            # We'll handle type conversion during final merge
-            def parse_and_convert_for_pivot(value: str) -> str:
-                """Parse JSON value and convert to string for pivot operation."""
-                parsed = self._parse_json_value(value)
-                if parsed is None:
-                    return ""
-                elif isinstance(parsed, bool):
-                    # Keep Boolean as "true"/"false" for later type inference
-                    return "true" if parsed else "false"
-                else:
-                    return str(parsed)
-
+            # Keep values as JSON Schema v2 strings for pivot
+            # Decode AFTER pivot to preserve dtype information
             changes_pl = changes_pl.with_columns(
                 [
                     pl.col("row_key").cast(pl.Utf8),
                     pl.col("col_key").cast(pl.Utf8),
-                    pl.col("value")
-                    .map_elements(parse_and_convert_for_pivot, return_dtype=pl.Utf8)
-                    .alias("value"),
+                    pl.col("value").cast(pl.Utf8),
                 ]
             )
 
@@ -1417,40 +1404,52 @@ class CacheManager:
                 pivot_rename_map = {c: f"{c}__delta" for c in pivot_cols}
                 pivot_pl = pivot_pl.rename(pivot_rename_map)
 
-            # Apply type inference to delta columns (simpler approach)
-            if pivot_cols:
+                # Decode JSON Schema v2 strings before return
+                # Extract dtype from JSON Schema v2 and use appropriate Polars dtype
                 delta_cols = [f"{c}__delta" for c in pivot_cols]
-
-                # Check each column and convert if all non-null values are Boolean strings
                 for col_name in delta_cols:
-                    try:
-                        # Get non-null values
-                        non_null_mask = pivot_pl[col_name].is_not_null()
+                    # Infer Polars dtype from first non-null JSON Schema v2 value
+                    sample_values = pivot_pl.select(pl.col(col_name)).to_series()
+                    polars_dtype = pl.Object  # Default fallback
 
-                        # Check if all non-null values are "true" or "false"
-                        all_boolean = pivot_pl.select(
-                            pl.col(col_name)
-                            .filter(non_null_mask)
-                            .is_in(["true", "false"])
-                            .all()
-                        ).item()
+                    # Try to extract dtype from JSON Schema v2
+                    for val in sample_values:
+                        if val and isinstance(val, str) and val.startswith('{"v":2'):
+                            try:
+                                schema = orjson.loads(val)
+                                if "type" in schema:
+                                    dtype_str = schema["type"]
+                                    # Precise dtype mapping to preserve all type information
+                                    dtype_map = {
+                                        "int8": pl.Int8,
+                                        "int16": pl.Int16,
+                                        "int32": pl.Int32,
+                                        "int64": pl.Int64,
+                                        "uint8": pl.UInt8,
+                                        "uint16": pl.UInt16,
+                                        "uint32": pl.UInt32,
+                                        "uint64": pl.UInt64,
+                                        "float32": pl.Float32,
+                                        "float64": pl.Float64,
+                                        "bool": pl.Boolean,
+                                        "object": pl.Utf8,
+                                        "string": pl.Utf8,
+                                        "category": pl.Utf8,  # Categorical as string, restore later
+                                    }
+                                    polars_dtype = dtype_map.get(dtype_str, pl.Object)
+                                    break  # Found dtype, stop searching
+                            except Exception:
+                                pass
 
-                        if all_boolean:
-                            # Convert the entire column to Boolean
-                            pivot_pl = pivot_pl.with_columns(
-                                pl.when(pl.col(col_name) == "true")
-                                .then(True)
-                                .when(pl.col(col_name) == "false")
-                                .then(False)
-                                .otherwise(None)
-                                .alias(col_name)
-                            )
-                    except Exception as e:
-                        # If conversion fails, keep as string
-                        logger.debug(
-                            f"Boolean conversion failed for column {col_name}: {e}"
+                    # Decode using _parse_json_value with inferred dtype
+                    pivot_pl = pivot_pl.with_columns(
+                        pl.col(col_name)
+                        .map_elements(
+                            lambda x: self._parse_json_value(x) if x else None,
+                            return_dtype=polars_dtype,
                         )
-                        pass
+                        .alias(col_name)
+                    )
 
             # Ensure row_key is string type
             pivot_pl = pivot_pl.with_columns(pl.col("row_key").cast(pl.Utf8))
